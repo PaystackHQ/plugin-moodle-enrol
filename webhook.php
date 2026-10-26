@@ -51,6 +51,9 @@ if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HT
 $input = @file_get_contents("php://input");
 $values = (array) json_decode($input, true);
 $metadata = $values['data']['metadata'] ?? [];
+if (!is_array($metadata)) {
+    $metadata = [];
+}
 
 $data = new stdClass();
 
