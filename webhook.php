@@ -50,7 +50,10 @@ if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HT
 
 $input = @file_get_contents("php://input");
 $values = (array) json_decode($input, true);
-$metadata = $values['data']['metadata'];
+$metadata = $values['data']['metadata'] ?? [];
+if (!is_array($metadata)) {
+    $metadata = [];
+}
 
 $data = new stdClass();
 
@@ -110,7 +113,7 @@ if (is_enrolled($context, $data->userid, '', true)) {
 // Verify Transaction 
 $res = $paystack->verify_transaction($data->reference);
 
-if ($res['status']) {
+if (!empty($res['status'])) {
     // Send the file, this line will be reached if no error was thrown above.
     $data->tax = $res['data']['amount'] / 100;
     $data->memo = $res['data']['gateway_response'];
@@ -183,7 +186,7 @@ if ($res['status']) {
         $shortname = format_string($course->shortname, true, array('context' => $context));
         if (!empty($mailstudents)) {
             $a = new stdClass();
-            $a->coursename = format_string($course->fullname, true, array('context' => $coursecontext));
+            $a->coursename = format_string($course->fullname, true, array('context' => $context));
             $a->profileurl = "$CFG->wwwroot/user/view.php?id=$user->id";
             $eventdata = new \core\message\message();
             $eventdata->modulename        = 'moodle';
@@ -199,7 +202,7 @@ if ($res['status']) {
             message_send($eventdata);
         }
         if (!empty($mailteachers) && !empty($teacher)) {
-            $a->course = format_string($course->fullname, true, array('context' => $coursecontext));
+            $a->course = format_string($course->fullname, true, array('context' => $context));
             $a->user = fullname($user);
             $eventdata = new \core\message\message();
             $eventdata->modulename        = 'moodle';
@@ -215,7 +218,7 @@ if ($res['status']) {
             message_send($eventdata);
         }
         if (!empty($mailadmins)) {
-            $a->course = format_string($course->fullname, true, array('context' => $coursecontext));
+            $a->course = format_string($course->fullname, true, array('context' => $context));
             $a->user = fullname($user);
             $admins = get_admins();
             foreach ($admins as $admin) {

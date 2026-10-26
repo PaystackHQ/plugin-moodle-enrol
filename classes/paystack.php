@@ -27,6 +27,7 @@ class paystack
     public $plugin_name;
     public $public_key;
     public $secret_key;
+    public $base_url;
 
     public function __construct($plugin, $pk, $sk)
     {
@@ -63,8 +64,6 @@ class paystack
         $request = curl_exec($curl);
 
         $res = json_decode($request, true);
-
-        curl_close($curl);
 
         if (curl_errno($curl)) {
             throw new \moodle_exception(
@@ -105,8 +104,6 @@ class paystack
         $request = curl_exec($curl);
         // $code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $res = json_decode($request, true);
-
-        curl_close($curl);
 
         if (curl_errno($curl)) {
             throw new \moodle_exception(
@@ -153,9 +150,6 @@ class paystack
 
         // execute post
         curl_exec($curl);
-
-        // close conection
-        curl_close($curl);
     }
 
     /**
@@ -166,6 +160,6 @@ class paystack
      */
     public function validate_webhook($input)
     {
-        return $_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] !== hash_hmac('sha512', $input, $this->secret_key);
+        return !hash_equals(hash_hmac('sha512', $input, (string) $this->secret_key), $_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] ?? '');
     }
 }
