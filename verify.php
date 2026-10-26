@@ -55,7 +55,7 @@ if (empty($_POST) or !empty($_GET)) {
     throw new moodle_exception('invalidrequest', 'core_error');
 }
 if (empty(required_param('paystack-trxref', PARAM_RAW))) {
-    print_error(get_string('paystack_sorry', 'enrol_paystack'));
+    throw new moodle_exception('paystack_sorry', 'enrol_paystack');
 }
 
 $data = new stdClass();
@@ -105,15 +105,15 @@ $courseUrl = "$CFG->wwwroot/course/view.php?id=$course->id";
 // Verify Transaction 
 $res = $paystack->verify_transaction($data->reference);
 
-if (!$res['status']) {
-    notice($res['message'], $courseUrl);
+if (empty($res['status'])) {
+    notice($res['message'] ?? get_string('paystack_sorry', 'enrol_paystack'), $courseUrl);
 }
 
 // Send the file, this line will be reached if no error was thrown above.
 $data->tax = $res['data']['amount'] / 100;
 $data->memo = $res['data']['gateway_response'];
 $data->payment_status = $res['data']['status'];
-$data->reason_code = $code;
+$data->reason_code = null;
 // If currency is incorrectly set then someone maybe trying to cheat the system
 if ($data->currency_code != $plugin_instance->currency) {
     $message = "Currency does not match course settings, received: " . $data->currency_code;
@@ -187,7 +187,7 @@ if ($data->payment_status == 'success') {
     $shortname = format_string($course->shortname, true, array('context' => $context));
     if (!empty($mailstudents)) {
         $a = new stdClass();
-        $a->course = format_string($course->fullname, true, array('context' => $coursecontext));
+        $a->course = format_string($course->fullname, true, array('context' => $context));
         $a->profileurl = "$CFG->wwwroot/user/view.php?id=$user->id";
         $eventdata = new \core\message\message();
         $eventdata->modulename        = 'moodle';
@@ -204,7 +204,7 @@ if ($data->payment_status == 'success') {
     }
     if (!empty($mailteachers) && !empty($teacher)) {
         $a = new stdClass();
-        $a->course = format_string($course->fullname, true, array('context' => $coursecontext));
+        $a->course = format_string($course->fullname, true, array('context' => $context));
         $a->user = fullname($user);
         $eventdata = new \core\message\message();
         $eventdata->modulename        = 'moodle';
@@ -221,7 +221,7 @@ if ($data->payment_status == 'success') {
     }
     if (!empty($mailadmins)) {
         $a = new stdClass();
-        $a->course = format_string($course->fullname, true, array('context' => $coursecontext));
+        $a->course = format_string($course->fullname, true, array('context' => $context));
         $a->user = fullname($user);
         $admins = get_admins();
         foreach ($admins as $admin) {
