@@ -72,6 +72,14 @@ if ($ADMIN->fulltree) {
     ));
 
     $settings->add(new admin_setting_configtext(
+        'enrol_paystack/live_webhooksecret',
+        get_string('live_webhooksecret', 'enrol_paystack'),
+        get_string('live_webhooksecret_desc', 'enrol_paystack'),
+        '',
+        PARAM_TEXT
+    ));
+
+    $settings->add(new admin_setting_configtext(
         'enrol_paystack/test_secretkey',
         get_string('test_secretkey', 'enrol_paystack'),
         get_string('test_secretkey_desc', 'enrol_paystack'),
@@ -83,6 +91,14 @@ if ($ADMIN->fulltree) {
         'enrol_paystack/test_publickey',
         get_string('test_publickey', 'enrol_paystack'),
         get_string('test_publickey_desc', 'enrol_paystack'),
+        '',
+        PARAM_TEXT
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'enrol_paystack/test_webhooksecret',
+        get_string('test_webhooksecret', 'enrol_paystack'),
+        get_string('test_webhooksecret_desc', 'enrol_paystack'),
         '',
         PARAM_TEXT
     ));

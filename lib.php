@@ -81,6 +81,18 @@ class enrol_paystack_plugin extends enrol_plugin
     }
 
     /**
+     * Return webhook signing secret based on mode.
+     *
+     * @return string
+     */
+    public function get_webhooksecret()
+    {
+        return $this->get_mode() ?
+            $this->get_config('live_webhooksecret') :
+            $this->get_config('test_webhooksecret') ;
+    }
+
+    /**
      * Defines if user can be managed from admin.
      *
      * @param  stdClass $instance course enrol instance
