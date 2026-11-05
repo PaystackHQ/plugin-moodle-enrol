@@ -43,7 +43,7 @@ if (!enrol_is_enabled('paystack')) {
 }
 
 // Keep out casual intruders.
-if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HTTP_X_PAYSTACK_SIGNATURE', $_SERVER)) {
+if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || (!array_key_exists('HTTP_X_PAYSTACK_SIGNATURE', $_SERVER) && !array_key_exists('HTTP_PAYSTACK_SIGNATURE', $_SERVER))) {
     http_response_code(400);
     throw new moodle_exception('invalidrequest', 'core_error');
 }
@@ -82,7 +82,7 @@ $data->payment_currency = $data->currency_code;
 $data->timeupdated      = time();
 
 $plugin = enrol_get_plugin('paystack');
-$paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
+$paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey(), $plugin->get_webhooksecret());
 
 // validate event do all at once to avoid timing attack
 if($paystack->validate_webhook($input)){
