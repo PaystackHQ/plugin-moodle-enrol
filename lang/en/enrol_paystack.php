@@ -110,7 +110,7 @@ $string['test_restrictedkey'] = 'Test restricted key';
 $string['test_restrictedkey_desc'] = 'A test restricted key, starting with rk_test_.';
 $string['restrictedkeys'] = 'Restricted keys';
 $string['restrictedkeys_desc'] = '<ol>
-<li>Create a restricted key in your <a href="https://dashboard.paystack.com/#/settings/developer" target="_blank" rel="noopener">Paystack Dashboard</a>.</li>
+<li>Create a restricted key in your <a href="https://dashboard.paystack.com/v2/developers/api-configuration" target="_blank" rel="noopener">Paystack Dashboard</a>.</li>
 <li>Turn on only Account: read and Transactions: read. Leave every other permission off.</li>
 <li>Paste a test key in Test and a live key in Live.</li>
 <li>You do not need a public key.</li>
@@ -155,3 +155,5 @@ $string['keyfailure_403'] = "Paystack refused the restricted key: it needs Accou
 $string['warning_nowebhooksecret'] = 'Webhooks are rejected until you add the {$a} webhook signing secret. Students are still enrolled when they return from checkout.';
 $string['warning_rkunchecked'] = "The {\$a} restricted key hasn't been checked with Paystack. Paste it again and save.";
 $string['warning_rkinsecretfield'] = 'The {$a} secret key field holds a restricted key. Paste it into the {$a} restricted key field instead.';
+$string['notconfigured'] = 'Paystack payments aren\'t set up for this course yet. Please contact the site administrator.';
+$string['warning_nokey'] = 'There is no usable {$a} key, so students can\'t pay. Add a restricted key, or a secret key and public key.';

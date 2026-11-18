@@ -162,10 +162,10 @@ class enrolment_test extends \advanced_testcase {
         [$course, $user, $instance] = $this->setup_course();
         $sink = $this->redirectMessages();
 
-        $this->assertSame('not_ours', enrolment::process($this->tx(), 'ref1', 'webhook'));
+        $this->assertSame('not_ours', enrolment::process($this->tx(), 'ref1', 'webhook')['status']);
         $other = $this->getDataGenerator()->create_course();
         $mismatch = $this->tx(['metadata' => ['custom' => "{$user->id}-{$other->id}-{$instance->id}"]]);
-        $this->assertSame('not_ours', enrolment::process($mismatch, 'ref1', 'webhook'));
+        $this->assertSame('not_ours', enrolment::process($mismatch, 'ref1', 'webhook')['status']);
         $this->assertSame(0, $this->error_messages($sink->get_messages()));
     }
 
@@ -175,7 +175,7 @@ class enrolment_test extends \advanced_testcase {
         [$course, $user, $instance] = $this->setup_course();
         $tx = $this->tx(['metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('wrong_user', enrolment::process($tx, 'ref1', 'return', $user->id + 1));
+        $this->assertSame('wrong_user', enrolment::process($tx, 'ref1', 'return', $user->id + 1)['status']);
         $this->assertSame(0, $DB->count_records('enrol_paystack'));
     }
 
@@ -185,18 +185,20 @@ class enrolment_test extends \advanced_testcase {
         $sink = $this->redirectMessages();
         $tx = $this->tx(['status' => 'abandoned', 'metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('not_successful', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client()));
+        $this->assertSame('not_successful', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client())['status']);
         $this->assertSame(0, $this->error_messages($sink->get_messages()));
     }
 
-    public function test_process_payment_mismatch_messages_admin(): void {
+    public function test_process_payment_mismatch_messages_admin_on_webhook_only(): void {
         global $DB;
         $this->resetAfterTest();
         [$course, $user, $instance] = $this->setup_course();
         $sink = $this->redirectMessages();
         $tx = $this->tx(['amount' => 5000, 'metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('payment_mismatch', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client()));
+        $this->assertSame('payment_mismatch', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client())['status']);
+        $this->assertSame(0, $this->error_messages($sink->get_messages()));
+        $this->assertSame('payment_mismatch', enrolment::process($tx, 'ref1', 'webhook', null, $this->client())['status']);
         $this->assertSame(1, $this->error_messages($sink->get_messages()));
         $this->assertSame(0, $DB->count_records('enrol_paystack'));
         $this->assertFalse(is_enrolled(\context_course::instance($course->id), $user));
@@ -208,7 +210,7 @@ class enrolment_test extends \advanced_testcase {
         $sink = $this->redirectMessages();
         $tx = $this->tx(['paid_at' => gmdate('c', time() - 86400), 'metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('payment_mismatch', enrolment::process($tx, 'ref1', 'webhook', null, $this->client()));
+        $this->assertSame('payment_mismatch', enrolment::process($tx, 'ref1', 'webhook', null, $this->client())['status']);
         $this->assertSame(1, $this->error_messages($sink->get_messages()));
     }
 
@@ -220,7 +222,7 @@ class enrolment_test extends \advanced_testcase {
         $tx = $this->tx(['gateway_response' => 'Successful', 'metadata' => $this->custom($user, $course, $instance)]);
         $_POST = ['business' => 'attacker@example.com', 'receiver_email' => 'x@example.com', 'payment_status' => 'bogus'];
 
-        $this->assertSame('enrolled', enrolment::process($tx, 'ref1', 'return', $user->id, $client));
+        $this->assertSame('enrolled', enrolment::process($tx, 'ref1', 'return', $user->id, $client)['status']);
         $_POST = [];
 
         $this->assertTrue(is_enrolled(\context_course::instance($course->id), $user, '', true));
@@ -237,22 +239,40 @@ class enrolment_test extends \advanced_testcase {
         $this->assertSame(['ref1'], $client->logged);
     }
 
-    public function test_process_second_call_is_already_enrolled(): void {
+    public function test_process_second_call_with_same_reference_is_already_used(): void {
         global $DB;
         $this->resetAfterTest();
         [$course, $user, $instance] = $this->setup_course(['mailstudents' => 0]);
         $client = $this->client();
         $tx = $this->tx(['metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('enrolled', enrolment::process($tx, 'ref1', 'return', $user->id, $client));
+        $first = enrolment::process($tx, 'ref1', 'return', $user->id, $client);
+        $this->assertSame(['status' => 'enrolled', 'courseid' => (int) $course->id], $first);
         $sink = $this->redirectMessages();
-        $this->assertSame('already_enrolled', enrolment::process($tx, 'ref1', 'webhook', null, $client));
+        $this->assertSame('already_used', enrolment::process($tx, 'ref1', 'webhook', null, $client)['status']);
         $this->assertSame(1, $DB->count_records('enrol_paystack'));
         $this->assertSame(0, $this->error_messages($sink->get_messages()));
         $this->assertSame(['ref1'], $client->logged);
     }
 
-    public function test_process_used_reference_for_unenrolled_user_messages_admin(): void {
+    public function test_process_new_reference_for_enrolled_user_is_recorded_without_enrolling(): void {
+        global $DB;
+        $this->resetAfterTest();
+        [$course, $user, $instance] = $this->setup_course(['mailstudents' => 1, 'mailadmins' => 1]);
+        $this->getDataGenerator()->enrol_user($user->id, $course->id);
+        $client = $this->client();
+        $sink = $this->redirectMessages();
+        $tx = $this->tx(['metadata' => $this->custom($user, $course, $instance)]);
+
+        $this->assertSame(['status' => 'already_enrolled', 'courseid' => (int) $course->id],
+            enrolment::process($tx, 'ref2', 'webhook', null, $client));
+        $this->assertTrue(enrolment::reference_used('ref2'));
+        $this->assertSame(0, $DB->count_records('user_enrolments', ['enrolid' => $instance->id]));
+        $this->assertCount(0, $sink->get_messages());
+        $this->assertSame([], $client->logged);
+    }
+
+    public function test_process_used_reference_for_unenrolled_user_messages_admin_on_webhook_only(): void {
         global $DB;
         $this->resetAfterTest();
         [$course, $user, $instance] = $this->setup_course();
@@ -260,9 +280,30 @@ class enrolment_test extends \advanced_testcase {
         $sink = $this->redirectMessages();
         $tx = $this->tx(['metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('already_used', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client()));
+        $this->assertSame('already_used', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client())['status']);
+        $this->assertSame(0, $this->error_messages($sink->get_messages()));
+        $this->assertSame('already_used', enrolment::process($tx, 'ref1', 'webhook', null, $this->client())['status']);
         $this->assertSame(1, $this->error_messages($sink->get_messages()));
         $this->assertFalse(is_enrolled(\context_course::instance($course->id), $user));
+    }
+
+    public function test_process_survives_a_failing_tracker(): void {
+        $this->resetAfterTest();
+        [$course, $user, $instance] = $this->setup_course();
+        $client = new class extends paystack {
+            public function __construct() {
+            }
+
+            public function log_transaction_success($reference) {
+                throw new \RuntimeException('down');
+            }
+        };
+        $tx = $this->tx(['metadata' => $this->custom($user, $course, $instance)]);
+        $log = ini_set('error_log', '/dev/null');
+
+        $this->assertSame('enrolled', enrolment::process($tx, 'ref1', 'return', $user->id, $client)['status']);
+        ini_set('error_log', $log);
+        $this->assertTrue(is_enrolled(\context_course::instance($course->id), $user, '', true));
     }
 
     public function test_process_notifies_teacher_only(): void {
@@ -273,7 +314,7 @@ class enrolment_test extends \advanced_testcase {
         $sink = $this->redirectMessages();
         $tx = $this->tx(['metadata' => $this->custom($user, $course, $instance)]);
 
-        $this->assertSame('enrolled', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client()));
+        $this->assertSame('enrolled', enrolment::process($tx, 'ref1', 'return', $user->id, $this->client())['status']);
         $messages = $sink->get_messages();
         $this->assertCount(1, $messages);
         $this->assertEquals($teacher->id, $messages[0]->useridto);

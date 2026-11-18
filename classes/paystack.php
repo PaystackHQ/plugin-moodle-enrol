@@ -38,47 +38,6 @@ class paystack
     }
 
     /**
-     * Verify Payment Transaction
-     *
-     * @param string $reference
-     * @param array $data
-     * @return void
-     */
-    public function initialize_transaction($data)
-    {
-        $paystackUrl = $this->base_url . "transaction/initialize";
-
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => $paystackUrl,
-            CURLOPT_CUSTOMREQUEST => "POST",
-            CURLOPT_POSTFIELDS => $data,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                "authorization: Bearer " . $this->secret_key,
-                "content-type: application/json",
-                "cache-control: no-cache"
-            ],
-        ]);
-
-        $request = curl_exec($curl);
-
-        $res = json_decode($request, true);
-
-        if (curl_errno($curl)) {
-            throw new \moodle_exception(
-                'errpaystackconnect',
-                'enrol_paystack',
-                '',
-                array('url' => $paystackUrl, 'response' => $res),
-                json_encode($data)
-            );
-        }
-
-        return $res;
-    }
-
-    /**
      * Whether a reference is safe to put in the verify URL path.
      *
      * @param mixed $reference
@@ -86,7 +45,7 @@ class paystack
      */
     public static function is_valid_reference($reference)
     {
-        return is_string($reference) && preg_match('/^[A-Za-z0-9._=-]{1,100}\z/', $reference) === 1;
+        return is_string($reference) && preg_match('/^(?=.*[A-Za-z0-9])[A-Za-z0-9._=-]{1,100}\z/', $reference) === 1;
     }
 
     /**

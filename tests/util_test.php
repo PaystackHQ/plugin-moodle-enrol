@@ -45,6 +45,7 @@ class util_test extends \advanced_testcase {
         $plugin = enrol_get_plugin('paystack');
         $plugin->set_config('mode', 0);
         $plugin->set_config('test_restrictedkey', self::RK);
+        $plugin->set_config('test_rkchecked', \enrol_paystack_plugin::rk_fingerprint(self::RK));
     }
 
     public function test_restricted_key_401_notifies_once_per_hour(): void {

@@ -50,6 +50,9 @@ if ($ADMIN->fulltree) {
     if ($paystackplugin->get_secretkey() !== '' && $paystackplugin->get_webhooksecret() === '') {
         $warnings[] = get_string('warning_nowebhooksecret', 'enrol_paystack', $activemode);
     }
+    if ($paystackplugin->get_secretkey() === '' || $paystackplugin->get_publickey() === '') {
+        $warnings[] = get_string('warning_nokey', 'enrol_paystack', $activemode);
+    }
     foreach (['test', 'live'] as $keymode) {
         if ($paystackplugin->has_restricted_key($keymode) && !$paystackplugin->is_rk_checked($keymode)) {
             $warnings[] = get_string('warning_rkunchecked', 'enrol_paystack', $keymode);
@@ -85,12 +88,14 @@ if ($ADMIN->fulltree) {
     ));
 
     foreach (['test', 'live'] as $keymode) {
-        $settings->add(new \enrol_paystack\admin_setting_restrictedkey(
+        $setting = new \enrol_paystack\admin_setting_restrictedkey(
             "enrol_paystack/{$keymode}_restrictedkey",
             get_string("{$keymode}_restrictedkey", 'enrol_paystack'),
             get_string("{$keymode}_restrictedkey_desc", 'enrol_paystack'),
             $keymode
-        ));
+        );
+        $setting->set_updatedcallback('enrol_paystack_register_sensible_settings');
+        $settings->add($setting);
     }
 
     $settings->add(new admin_setting_heading(
@@ -100,12 +105,14 @@ if ($ADMIN->fulltree) {
     ));
 
     foreach (['test', 'live'] as $keymode) {
-        $settings->add(new \enrol_paystack\admin_setting_webhooksecret(
+        $setting = new \enrol_paystack\admin_setting_webhooksecret(
             "enrol_paystack/{$keymode}_webhooksecret",
             get_string("{$keymode}_webhooksecret", 'enrol_paystack'),
             get_string('webhooksecret_desc', 'enrol_paystack'),
             ''
-        ));
+        );
+        $setting->set_updatedcallback('enrol_paystack_register_sensible_settings');
+        $settings->add($setting);
     }
 
     $settings->add(new admin_setting_heading(
@@ -115,12 +122,14 @@ if ($ADMIN->fulltree) {
     ));
 
     foreach (['test', 'live'] as $keymode) {
-        $settings->add(new \enrol_paystack\admin_setting_secretkey(
+        $setting = new \enrol_paystack\admin_setting_secretkey(
             "enrol_paystack/{$keymode}_secretkey",
             get_string("{$keymode}_secretkey", 'enrol_paystack'),
             get_string("{$keymode}_secretkey_desc", 'enrol_paystack'),
             $keymode
-        ));
+        );
+        $setting->set_updatedcallback('enrol_paystack_register_sensible_settings');
+        $settings->add($setting);
 
         $settings->add(new admin_setting_configtext(
             "enrol_paystack/{$keymode}_publickey",

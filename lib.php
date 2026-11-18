@@ -64,22 +64,25 @@ class enrol_paystack_plugin extends enrol_plugin
     public function get_publickey()
     {
         $prefix = $this->mode_prefix();
-        if ($this->get_restrictedkey($prefix) !== '') {
-            return $this->get_config($prefix . '_rkpublickey');
+        if ($this->has_restricted_key($prefix)) {
+            return $this->is_rk_checked($prefix) ? trim((string) $this->get_config($prefix . '_rkpublickey')) : '';
         }
-        return $this->get_config($prefix . '_publickey');
+        return trim((string) $this->get_config($prefix . '_publickey'));
     }
 
     /**
-     * Return secret key of this enrol plugin: the restricted key when one is saved.
+     * Return secret key of this enrol plugin: the restricted key when one is saved and checked.
+     * An unchecked restricted key yields '' rather than falling back to the secret key.
      *
      * @return string
      */
     public function get_secretkey()
     {
         $prefix = $this->mode_prefix();
-        $restricted = $this->get_restrictedkey($prefix);
-        return $restricted !== '' ? $restricted : trim((string) $this->get_config($prefix . '_secretkey'));
+        if ($this->has_restricted_key($prefix)) {
+            return $this->is_rk_checked($prefix) ? $this->get_restrictedkey($prefix) : '';
+        }
+        return trim((string) $this->get_config($prefix . '_secretkey'));
     }
 
     private function mode_prefix()
@@ -442,6 +445,11 @@ class enrol_paystack_plugin extends enrol_plugin
             return ob_get_clean();
         }
 
+        if ($this->get_secretkey() === '' || $this->get_publickey() === '') {
+            echo '<p>' . get_string('notconfigured', 'enrol_paystack') . '</p>';
+            return $OUTPUT->box(ob_get_clean());
+        }
+
         $course = $DB->get_record('course', array('id' => $instance->courseid));
         $context = context_course::instance($course->id);
 
@@ -621,4 +629,11 @@ class enrol_paystack_plugin extends enrol_plugin
         }
         return $token;
     }
+}
+
+/**
+ * Updated callback of the key settings: keeps them marked sensitive for admin presets.
+ */
+function enrol_paystack_register_sensible_settings() {
+    \enrol_paystack\util::register_sensible_settings();
 }

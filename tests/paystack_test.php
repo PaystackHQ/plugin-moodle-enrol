@@ -34,7 +34,7 @@ class paystack_test extends \advanced_testcase {
     }
 
     public function test_invalid_references(): void {
-        $invalid = ['../../transfer', 'a/b', 'a b', '', str_repeat('a', 101), "\u{00e9}clair", "abc\n", null, 123];
+        $invalid = ['../../transfer', '..', '.', '...', 'a/b', 'a b', '', str_repeat('a', 101), "\u{00e9}clair", "abc\n", null, 123];
         foreach ($invalid as $reference) {
             $this->assertFalse(paystack::is_valid_reference($reference));
         }

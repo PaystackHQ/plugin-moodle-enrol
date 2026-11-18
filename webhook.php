@@ -94,5 +94,5 @@ if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset
     exit;
 }
 
-$result = \enrol_paystack\enrolment::process($body['data'], $reference, 'webhook', null, $paystack);
-http_response_code($result === 'busy' ? 500 : 200);
+$outcome = \enrol_paystack\enrolment::process($body['data'], $reference, 'webhook', null, $paystack);
+http_response_code($outcome['status'] === 'busy' ? 500 : 200);

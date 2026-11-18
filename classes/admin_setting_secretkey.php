@@ -54,8 +54,7 @@ class admin_setting_secretkey extends admin_setting_secret
             ));
         }
         // The restricted key setting sits earlier on the page, so a removal in this save is already applied.
-        $typed = trim(optional_param('s_enrol_paystack_' . $this->mode . '_restrictedkey', '', PARAM_RAW));
-        if (enrol_get_plugin('paystack')->has_restricted_key($this->mode) || $typed !== '') {
+        if (enrol_get_plugin('paystack')->has_restricted_key($this->mode)) {
             return get_string('sk_remove_rk_first', 'enrol_paystack',
                 get_string('rk_mode_' . $this->mode, 'enrol_paystack'));
         }

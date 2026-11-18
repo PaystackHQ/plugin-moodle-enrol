@@ -235,16 +235,6 @@ final class admin_setting_restrictedkey_test extends \advanced_testcase {
         $this->assertSame('', $this->sk('live')->write_setting('sk_live_' . 'abcdefghijklmnopqrstuvwxyz0123'));
     }
 
-    public function test_secretkey_refused_when_restricted_key_posted_alongside(): void {
-        $_POST['s_enrol_paystack_test_restrictedkey'] = self::TESTRK;
-        $message = $this->sk()->write_setting(self::TESTSK);
-        $this->assertSame(get_string('sk_remove_rk_first', 'enrol_paystack', 'test'), $message);
-        $this->assertEmpty($this->cfg('test_secretkey'));
-
-        $_POST['s_enrol_paystack_test_restrictedkey'] = '  ';
-        $this->assertSame('', $this->sk()->write_setting(self::TESTSK));
-    }
-
     public function test_secretkey_wrong_mode_is_refused(): void {
         $message = $this->sk('test')->write_setting('sk_live_' . 'abcdefghijklmnopqrstuvwxyz0123');
         $this->assertStringContainsString('Paystack Live Secret Key', $message);
@@ -351,6 +341,12 @@ final class admin_setting_restrictedkey_test extends \advanced_testcase {
         set_config('test_restrictedkey', self::TESTRK, 'enrol_paystack');
         set_config('test_rkpublickey', 'pk_test_fromrk', 'enrol_paystack');
         $plugin = new \enrol_paystack_plugin();
+        // Stored but unchecked: unusable, with no fallback to the secret key.
+        $this->assertSame('', $plugin->get_secretkey());
+        $this->assertSame('', $plugin->get_publickey());
+
+        set_config('test_rkchecked', \enrol_paystack_plugin::rk_fingerprint(self::TESTRK), 'enrol_paystack');
+        $plugin = new \enrol_paystack_plugin();
         $this->assertSame(self::TESTRK, $plugin->get_secretkey());
         $this->assertSame('pk_test_fromrk', $plugin->get_publickey());
 
@@ -361,6 +357,7 @@ final class admin_setting_restrictedkey_test extends \advanced_testcase {
 
         set_config('live_restrictedkey', ' ' . self::LIVERK . ' ', 'enrol_paystack');
         set_config('live_rkpublickey', 'pk_live_fromrk', 'enrol_paystack');
+        set_config('live_rkchecked', \enrol_paystack_plugin::rk_fingerprint(self::LIVERK), 'enrol_paystack');
         $plugin = new \enrol_paystack_plugin();
         $this->assertSame(self::LIVERK, $plugin->get_secretkey());
         $this->assertSame('pk_live_fromrk', $plugin->get_publickey());

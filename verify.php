@@ -33,10 +33,6 @@ require_once($CFG->libdir . '/filelib.php');
 
 require_login();
 
-// Paystack does not like when we return error messages here,
-// the custom handler just logs exceptions and stops.
-set_exception_handler(\enrol_paystack\util::get_exception_handler());
-
 // Make sure we are enabled in the first place.
 if (!enrol_is_enabled('paystack')) {
     http_response_code(503);
@@ -68,13 +64,12 @@ if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset
 }
 $txdata = $body['data'];
 
-$result = \enrol_paystack\enrolment::process($txdata, $reference, 'return', $USER->id, $paystack);
-
-$ids = \enrol_paystack\enrolment::parse_custom($txdata['metadata'] ?? null);
-$courseurl = $ids === null ? $home : new moodle_url('/course/view.php', ['id' => $ids['courseid']]);
+$outcome = \enrol_paystack\enrolment::process($txdata, $reference, 'return', $USER->id, $paystack);
+$result = $outcome['status'];
+$courseurl = $outcome['courseid'] === null ? $home : new moodle_url('/course/view.php', ['id' => $outcome['courseid']]);
 
 if ($result === 'enrolled' || $result === 'already_enrolled') {
-    $course = $DB->get_record('course', ['id' => $ids['courseid']], '*', MUST_EXIST);
+    $course = $DB->get_record('course', ['id' => $outcome['courseid']], '*', MUST_EXIST);
     $fullname = format_string($course->fullname, true, ['context' => context_course::instance($course->id)]);
     redirect($courseurl, get_string('paymentthanks', '', $fullname));
 }

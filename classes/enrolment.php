@@ -130,20 +130,21 @@ class enrolment {
      *
      * @param array $txdata The data element of a successful verify response.
      * @param string $reference Paystack transaction reference.
-     * @param string $source 'return' or 'webhook'.
+     * @param string $source 'return' or 'webhook'; only webhook failures message the admin, as students can trigger the return path at will.
      * @param int|null $expecteduserid The logged-in user on the return path, null on the webhook.
      * @param \enrol_paystack\paystack|null $client Client used for the tracker call; built from settings when null.
-     * @return string not_ours|wrong_user|not_successful|payment_mismatch|busy|already_enrolled|already_used|enrolled
+     * @return array ['status' => not_ours|wrong_user|not_successful|payment_mismatch|busy|already_enrolled|already_used|enrolled,
+     *     'courseid' => int|null] with the course set once the metadata resolved to one.
      */
     public static function process(array $txdata, $reference, $source, $expecteduserid = null, $client = null) {
         global $DB;
 
         $ids = self::parse_custom($txdata['metadata'] ?? null);
         if ($ids === null) {
-            return 'not_ours';
+            return ['status' => 'not_ours', 'courseid' => null];
         }
         if ($expecteduserid !== null && $ids['userid'] !== (int) $expecteduserid) {
-            return 'wrong_user';
+            return ['status' => 'wrong_user', 'courseid' => null];
         }
 
         $instance = $DB->get_record('enrol', [
@@ -155,13 +156,14 @@ class enrolment {
         $user = $DB->get_record('user', ['id' => $ids['userid'], 'deleted' => 0], '*', IGNORE_MISSING);
         $course = $DB->get_record('course', ['id' => $ids['courseid']], '*', IGNORE_MISSING);
         if (!$instance || !$user || !$course) {
-            return 'not_ours';
+            return ['status' => 'not_ours', 'courseid' => null];
         }
+        $courseid = (int) $course->id;
         $context = \context_course::instance($course->id);
         $plugin = enrol_get_plugin('paystack');
 
         if (!isset($txdata['status']) || $txdata['status'] !== 'success') {
-            return 'not_successful';
+            return ['status' => 'not_successful', 'courseid' => $courseid];
         }
 
         $amount = isset($txdata['amount']) && is_int($txdata['amount']) ? $txdata['amount'] : 0;
@@ -180,21 +182,23 @@ class enrolment {
         $problem = self::check_payment($txdata, $instance, $cost, $plugin->get_mode() ? 'live' : 'test',
             $guard === false || $guard === '' ? null : (int) $guard);
         if ($problem !== null) {
-            util::message_paystack_error_to_admin($problem, $adminrecord);
-            return 'payment_mismatch';
+            if ($source === 'webhook') {
+                util::message_paystack_error_to_admin($problem, $adminrecord);
+            }
+            return ['status' => 'payment_mismatch', 'courseid' => $courseid];
         }
 
         $lock = \core\lock\lock_config::get_lock_factory('enrol_paystack')->get_lock('ref_' . sha1($reference), 10);
         if (!$lock) {
-            return 'busy';
+            return ['status' => 'busy', 'courseid' => $courseid];
         }
         try {
-            if (is_enrolled($context, $user->id, '', true)) {
-                return 'already_enrolled';
-            }
             if (self::reference_used($reference)) {
-                util::message_paystack_error_to_admin('Payment reference already used', $adminrecord);
-                return 'already_used';
+                // A webhook following the return path reuses the reference legitimately; only an unenrolled user is suspicious.
+                if ($source === 'webhook' && !is_enrolled($context, $user->id, '', true)) {
+                    util::message_paystack_error_to_admin('Payment reference already used', $adminrecord);
+                }
+                return ['status' => 'already_used', 'courseid' => $courseid];
             }
 
             $record = (object) [
@@ -209,6 +213,11 @@ class enrolment {
                 'timeupdated' => time(),
             ];
 
+            if (is_enrolled($context, $user->id, '', true)) {
+                $DB->insert_record('enrol_paystack', $record);
+                return ['status' => 'already_enrolled', 'courseid' => $courseid];
+            }
+
             $transaction = $DB->start_delegated_transaction();
             try {
                 $DB->insert_record('enrol_paystack', $record);
@@ -220,7 +229,7 @@ class enrolment {
                     $timeend = 0;
                 }
                 $plugin->enrol_user($instance, $user->id, $instance->roleid, $timestart, $timeend);
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $transaction->rollback($e);
             }
             $transaction->allow_commit();
@@ -228,14 +237,23 @@ class enrolment {
             $lock->release();
         }
 
-        self::send_notifications($plugin, $course, $user, $context);
-
-        if ($client === null) {
-            $client = new paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
+        // Best effort: the student is already enrolled.
+        try {
+            self::send_notifications($plugin, $course, $user, $context);
+        } catch (\Throwable $e) {
+            error_log('enrol_paystack: sending enrolment notifications failed');
         }
-        $client->log_transaction_success($reference);
 
-        return 'enrolled';
+        try {
+            if ($client === null) {
+                $client = new paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
+            }
+            $client->log_transaction_success($reference);
+        } catch (\Throwable $e) {
+            error_log('enrol_paystack: transaction tracker call failed');
+        }
+
+        return ['status' => 'enrolled', 'courseid' => $courseid];
     }
 
     /**

@@ -63,21 +63,12 @@ function xmldb_enrol_paystack_upgrade($oldversion) {
 
         \enrol_paystack\util::register_sensible_settings();
 
-        if ($dbman->table_exists('logstore_standard_log')) {
-            $conditions = ['eventname = ?'];
-            $params = ['\\core\\event\\config_log_created'];
-            $conditions[] = $DB->sql_like('other', '?', false);
-            $params[] = '%enrol_paystack%';
-            $secret = [];
-            foreach (['secretkey', 'restrictedkey', 'webhooksecret'] as $name) {
-                $secret[] = $DB->sql_like('other', '?', false);
-                $params[] = "%$name%";
-            }
-            $conditions[] = '(' . implode(' OR ', $secret) . ')';
-            $DB->delete_records_select('logstore_standard_log', implode(' AND ', $conditions), $params);
-        }
-
         upgrade_plugin_savepoint(true, 2026111804, 'enrol', 'paystack');
+    }
+
+    if ($oldversion < 2026111805) {
+        \core\task\manager::queue_adhoc_task(new \enrol_paystack\task\purge_key_logs(), true);
+        upgrade_plugin_savepoint(true, 2026111805, 'enrol', 'paystack');
     }
 
     return true;
