@@ -64,6 +64,29 @@ final class util {
     }
 
     /**
+     * Tell the admin Paystack rejected the restricted key, at most once an hour.
+     *
+     * @param int $http HTTP status of the failed Paystack call
+     * @param stdClass $data
+     */
+    public static function notify_key_failure(int $http, $data): void
+    {
+        if ($http !== 401 && $http !== 403) {
+            return;
+        }
+        $key = enrol_get_plugin('paystack')->get_secretkey();
+        if (restricted_key::key_type($key) !== 'rk') {
+            return;
+        }
+        $last = (int) get_config('enrol_paystack', 'keyfailure_last');
+        if ($last > time() - 3600) {
+            return;
+        }
+        set_config('keyfailure_last', time(), 'enrol_paystack');
+        self::message_paystack_error_to_admin(get_string("keyfailure_$http", 'enrol_paystack'), $data);
+    }
+
+    /**
      * Silent exception handler.
      *
      * @return callable exception handler

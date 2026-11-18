@@ -79,7 +79,7 @@ class enrol_paystack_plugin extends enrol_plugin
     {
         $prefix = $this->mode_prefix();
         $restricted = $this->get_restrictedkey($prefix);
-        return $restricted !== '' ? $restricted : $this->get_config($prefix . '_secretkey');
+        return $restricted !== '' ? $restricted : trim((string) $this->get_config($prefix . '_secretkey'));
     }
 
     private function mode_prefix()

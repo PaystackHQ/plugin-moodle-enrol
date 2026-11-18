@@ -31,7 +31,7 @@ defined('LIVE_MODE_DISABLED') || define('LIVE_MODE_DISABLED', 0);
 /** Paystack live mode enabled.*/
 defined('LIVE_MODE_ENABLED') || define('LIVE_MODE_ENABLED', 1);
 
-global $CFG;
+global $CFG, $OUTPUT;
 
 if ($ADMIN->fulltree) {
     $webhook = "$CFG->wwwroot/enrol/paystack/webhook.php";
@@ -42,6 +42,30 @@ if ($ADMIN->fulltree) {
         '',
         get_string('pluginname_desc', 'enrol_paystack') . " " . $text
     ));
+
+    $paystackplugin = enrol_get_plugin('paystack');
+    $paystackconfig = get_config('enrol_paystack');
+    $warnings = [];
+    $activemode = $paystackplugin->get_mode() ? 'live' : 'test';
+    if ($paystackplugin->get_secretkey() !== '' && $paystackplugin->get_webhooksecret() === '') {
+        $warnings[] = get_string('warning_nowebhooksecret', 'enrol_paystack', $activemode);
+    }
+    foreach (['test', 'live'] as $keymode) {
+        $rk = trim((string) ($paystackconfig->{"{$keymode}_restrictedkey"} ?? ''));
+        if ($rk !== '' && ($paystackconfig->{"{$keymode}_rkchecked"} ?? '') !== hash('sha256', $rk)) {
+            $warnings[] = get_string('warning_rkunchecked', 'enrol_paystack', $keymode);
+        }
+        if (strpos((string) ($paystackconfig->{"{$keymode}_secretkey"} ?? ''), 'rk_') === 0) {
+            $warnings[] = get_string('warning_rkinsecretfield', 'enrol_paystack', $keymode);
+        }
+    }
+    if ($warnings) {
+        $html = '';
+        foreach ($warnings as $warning) {
+            $html .= $OUTPUT->notification($warning, \core\output\notification::NOTIFY_WARNING);
+        }
+        $settings->add(new admin_setting_heading('enrol_paystack_warnings', '', $html));
+    }
 
     $options = array(
         LIVE_MODE_ENABLED  => get_string('mode_live', 'enrol_paystack'),

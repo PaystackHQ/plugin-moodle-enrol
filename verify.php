@@ -80,10 +80,12 @@ $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(
 
 // Everything below is taken from the verified transaction, never from the POST body.
 $res = $paystack->verify_transaction($data->reference);
-if (empty($res['status']) || empty($res['data']) || !is_array($res['data'])) {
+$body = $res['body'];
+if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset($body['data']) || !is_array($body['data'])) {
+    \enrol_paystack\util::notify_key_failure($res['http'], $data);
     notice(get_string('paystack_sorry', 'enrol_paystack'), $CFG->wwwroot . '/');
 }
-$txdata = $res['data'];
+$txdata = $body['data'];
 
 $ids = \enrol_paystack\enrolment::parse_custom($txdata['metadata'] ?? null);
 if ($ids === null || $ids['userid'] !== (int) $USER->id) {

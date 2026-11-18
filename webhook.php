@@ -78,9 +78,10 @@ $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(
 
 // Verify Transaction
 $res = $paystack->verify_transaction($reference);
+$body = $res['body'];
 
-if (!empty($res['status']) && !empty($res['data']) && is_array($res['data'])) {
-    $txdata = $res['data'];
+if ($res['http'] >= 200 && $res['http'] <= 299 && !empty($body['status']) && isset($body['data']) && is_array($body['data'])) {
+    $txdata = $body['data'];
 
     $ids = \enrol_paystack\enrolment::parse_custom($txdata['metadata'] ?? null);
     if ($ids === null) {
@@ -228,4 +229,13 @@ if (!empty($res['status']) && !empty($res['data']) && is_array($res['data'])) {
         );
         die;
     }
+} else {
+    if ($res['http'] === 0 || $res['http'] === 429 || $res['http'] >= 500) {
+        // Transient: let Paystack retry.
+        http_response_code(500);
+        exit;
+    }
+    error_log('enrol_paystack webhook: transaction verification failed (HTTP ' . (int) $res['http'] . ')');
+    http_response_code(200);
+    exit;
 }

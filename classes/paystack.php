@@ -79,43 +79,59 @@ class paystack
     }
 
     /**
+     * Whether a reference is safe to put in the verify URL path.
+     *
+     * @param mixed $reference
+     * @return bool
+     */
+    public static function is_valid_reference($reference): bool
+    {
+        return is_string($reference) && preg_match('/^[A-Za-z0-9._=-]{1,100}\z/', $reference) === 1;
+    }
+
+    /**
      * Verify Payment Transaction
      *
      * @param string $reference
-     * @return void
+     * @return array ['http' => int status (0 when no response), 'body' => decoded array|null]
      */
     public function verify_transaction($reference)
     {
-        $paystackUrl = $this->base_url . "transaction/verify/" . $reference;
+        if (!self::is_valid_reference($reference)) {
+            return ['http' => 0, 'body' => null];
+        }
+
+        $paystackUrl = $this->base_url . "transaction/verify/" . rawurlencode($reference);
 
         $curl = curl_init();
-        
+
         curl_setopt_array($curl, [
             CURLOPT_URL => $paystackUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => "GET",
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HTTPHEADER => [
                 "authorization: Bearer " . $this->secret_key,
                 "content-type: application/json",
                 "cache-control: no-cache"
             ],
         ]);
-
-        $request = curl_exec($curl);
-        // $code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $res = json_decode($request, true);
-
-        if (curl_errno($curl)) {
-            throw new \moodle_exception(
-                'errpaystackconnect',
-                'enrol_paystack',
-                '',
-                array('url' => $paystackUrl, 'response' => $res),
-                ''
-            );
+        if (defined('CURLOPT_PROTOCOLS_STR')) {
+            curl_setopt($curl, CURLOPT_PROTOCOLS_STR, 'https');
+        } else {
+            curl_setopt($curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
         }
 
-        return $res;
+        $request = curl_exec($curl);
+        $http = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+
+        $body = is_string($request) ? json_decode($request, true) : null;
+
+        return ['http' => $http, 'body' => is_array($body) ? $body : null];
     }
 
     /**
