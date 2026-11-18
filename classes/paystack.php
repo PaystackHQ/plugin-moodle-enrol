@@ -84,7 +84,7 @@ class paystack
      * @param mixed $reference
      * @return bool
      */
-    public static function is_valid_reference($reference): bool
+    public static function is_valid_reference($reference)
     {
         return is_string($reference) && preg_match('/^[A-Za-z0-9._=-]{1,100}\z/', $reference) === 1;
     }
@@ -109,22 +109,12 @@ class paystack
             CURLOPT_URL => $paystackUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => "GET",
-            CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_TIMEOUT => 15,
-            CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HTTPHEADER => [
                 "authorization: Bearer " . $this->secret_key,
                 "content-type: application/json",
                 "cache-control: no-cache"
             ],
-        ]);
-        if (defined('CURLOPT_PROTOCOLS_STR')) {
-            curl_setopt($curl, CURLOPT_PROTOCOLS_STR, 'https');
-        } else {
-            curl_setopt($curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
-        }
+        ] + http::curl_options($paystackUrl, 15, 5));
 
         $request = curl_exec($curl);
         $http = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
@@ -162,7 +152,7 @@ class paystack
                 "content-type: application/json",
                 "cache-control: no-cache"
             ],
-        ]);
+        ] + http::curl_options($url, 5, 3));
 
         // execute post
         curl_exec($curl);

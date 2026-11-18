@@ -34,7 +34,7 @@ class enrolment {
      * @param array|string|null $metadata Array or JSON string from the verify response.
      * @return array|null ['userid', 'courseid', 'instanceid'] or null when invalid.
      */
-    public static function parse_custom($metadata): ?array {
+    public static function parse_custom($metadata) {
         if (is_string($metadata)) {
             $metadata = json_decode($metadata, true);
         }
@@ -64,7 +64,7 @@ class enrolment {
      * @param mixed $defaultcost Plugin-level cost used when the instance has none.
      * @return float
      */
-    public static function resolve_cost(\stdClass $instance, $defaultcost): float {
+    public static function resolve_cost(\stdClass $instance, $defaultcost) {
         $cost = (float) $instance->cost;
         if ($cost <= 0) {
             $cost = (float) $defaultcost;
@@ -78,15 +78,21 @@ class enrolment {
      * @param array $txdata The data element of the verify response.
      * @param \stdClass $instance Enrol instance.
      * @param float $cost Resolved course cost in major units.
+     * @param string $expecteddomain 'live' or 'test', matching the configured mode.
+     * @param int|null $replayguardsince Transactions paid before this timestamp are refused; null disables the check.
      * @return string|null Null when acceptable, otherwise a short reason.
      */
-    public static function check_payment(array $txdata, \stdClass $instance, float $cost): ?string {
+    public static function check_payment(array $txdata, \stdClass $instance, $cost, $expecteddomain, $replayguardsince = null) {
         if (!isset($txdata['status']) || $txdata['status'] !== 'success') {
             return 'Payment status not successful';
         }
+        $domain = isset($txdata['domain']) && is_string($txdata['domain']) ? $txdata['domain'] : '';
+        if ($domain !== $expecteddomain) {
+            return 'Transaction domain does not match the configured mode, received: ' . s($domain);
+        }
         $currency = isset($txdata['currency']) && is_string($txdata['currency']) ? strtoupper($txdata['currency']) : '';
         if ($currency !== strtoupper((string) $instance->currency)) {
-            return 'Currency does not match course settings, received: ' . $currency;
+            return 'Currency does not match course settings, received: ' . s($currency);
         }
         if (!isset($txdata['amount']) || !is_int($txdata['amount'])) {
             return 'Missing or invalid amount';
@@ -94,6 +100,16 @@ class enrolment {
         $required = (int) round($cost * 100);
         if ($txdata['amount'] < $required) {
             return 'Amount paid is not enough (' . $txdata['amount'] . ' < ' . $required . ')';
+        }
+        if ($replayguardsince) {
+            $paidat = $txdata['paid_at'] ?? ($txdata['transaction_date'] ?? null);
+            $paid = is_string($paidat) ? strtotime($paidat) : false;
+            if ($paid === false) {
+                return 'Missing or unparseable payment date';
+            }
+            if ($paid < (int) $replayguardsince) {
+                return 'Payment was made before this plugin version started verifying payments';
+            }
         }
         return null;
     }
@@ -104,8 +120,178 @@ class enrolment {
      * @param string $reference Paystack transaction reference.
      * @return bool
      */
-    public static function reference_used(string $reference): bool {
+    public static function reference_used($reference) {
         global $DB;
         return $DB->record_exists('enrol_paystack', ['txn_id' => $reference]);
+    }
+
+    /**
+     * Verify a transaction against its enrol instance and enrol the user once per reference.
+     *
+     * @param array $txdata The data element of a successful verify response.
+     * @param string $reference Paystack transaction reference.
+     * @param string $source 'return' or 'webhook'.
+     * @param int|null $expecteduserid The logged-in user on the return path, null on the webhook.
+     * @param \enrol_paystack\paystack|null $client Client used for the tracker call; built from settings when null.
+     * @return string not_ours|wrong_user|not_successful|payment_mismatch|busy|already_enrolled|already_used|enrolled
+     */
+    public static function process(array $txdata, $reference, $source, $expecteduserid = null, $client = null) {
+        global $DB;
+
+        $ids = self::parse_custom($txdata['metadata'] ?? null);
+        if ($ids === null) {
+            return 'not_ours';
+        }
+        if ($expecteduserid !== null && $ids['userid'] !== (int) $expecteduserid) {
+            return 'wrong_user';
+        }
+
+        $instance = $DB->get_record('enrol', [
+            'id' => $ids['instanceid'],
+            'courseid' => $ids['courseid'],
+            'enrol' => 'paystack',
+            'status' => 0,
+        ], '*', IGNORE_MISSING);
+        $user = $DB->get_record('user', ['id' => $ids['userid'], 'deleted' => 0], '*', IGNORE_MISSING);
+        $course = $DB->get_record('course', ['id' => $ids['courseid']], '*', IGNORE_MISSING);
+        if (!$instance || !$user || !$course) {
+            return 'not_ours';
+        }
+        $context = \context_course::instance($course->id);
+        $plugin = enrol_get_plugin('paystack');
+
+        if (!isset($txdata['status']) || $txdata['status'] !== 'success') {
+            return 'not_successful';
+        }
+
+        $amount = isset($txdata['amount']) && is_int($txdata['amount']) ? $txdata['amount'] : 0;
+        $adminrecord = (object) [
+            'reference' => $reference,
+            'userid' => $user->id,
+            'courseid' => $course->id,
+            'instanceid' => $instance->id,
+            'payment_status' => 'success',
+            'payment_currency' => is_string($txdata['currency'] ?? null) ? $txdata['currency'] : '',
+            'payment_gross' => $amount / 100,
+        ];
+
+        $cost = self::resolve_cost($instance, $plugin->get_config('cost'));
+        $guard = get_config('enrol_paystack', 'replayguard_since');
+        $problem = self::check_payment($txdata, $instance, $cost, $plugin->get_mode() ? 'live' : 'test',
+            $guard === false || $guard === '' ? null : (int) $guard);
+        if ($problem !== null) {
+            util::message_paystack_error_to_admin($problem, $adminrecord);
+            return 'payment_mismatch';
+        }
+
+        $lock = \core\lock\lock_config::get_lock_factory('enrol_paystack')->get_lock('ref_' . sha1($reference), 10);
+        if (!$lock) {
+            return 'busy';
+        }
+        try {
+            if (is_enrolled($context, $user->id, '', true)) {
+                return 'already_enrolled';
+            }
+            if (self::reference_used($reference)) {
+                util::message_paystack_error_to_admin('Payment reference already used', $adminrecord);
+                return 'already_used';
+            }
+
+            $record = (object) [
+                'userid' => $user->id,
+                'courseid' => $course->id,
+                'instanceid' => $instance->id,
+                'item_name' => \core_text::substr($course->fullname, 0, 255),
+                'txn_id' => $reference,
+                'payment_status' => 'success',
+                'memo' => \core_text::substr((string) ($txdata['gateway_response'] ?? ''), 0, 255),
+                'tax' => (string) ($amount / 100),
+                'timeupdated' => time(),
+            ];
+
+            $transaction = $DB->start_delegated_transaction();
+            try {
+                $DB->insert_record('enrol_paystack', $record);
+                if ($instance->enrolperiod) {
+                    $timestart = time();
+                    $timeend = $timestart + $instance->enrolperiod;
+                } else {
+                    $timestart = 0;
+                    $timeend = 0;
+                }
+                $plugin->enrol_user($instance, $user->id, $instance->roleid, $timestart, $timeend);
+            } catch (\Exception $e) {
+                $transaction->rollback($e);
+            }
+            $transaction->allow_commit();
+        } finally {
+            $lock->release();
+        }
+
+        self::send_notifications($plugin, $course, $user, $context);
+
+        if ($client === null) {
+            $client = new paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
+        }
+        $client->log_transaction_success($reference);
+
+        return 'enrolled';
+    }
+
+    /**
+     * Send the enrolment notifications enabled in the plugin settings.
+     *
+     * @param \enrol_paystack_plugin $plugin
+     * @param \stdClass $course
+     * @param \stdClass $user
+     * @param \context_course $context
+     */
+    private static function send_notifications($plugin, $course, $user, $context) {
+        global $CFG;
+
+        // Pass $view=true to filter hidden caps if the user cannot see them.
+        $teacher = false;
+        if ($users = get_users_by_capability($context, 'moodle/course:update', 'u.*', 'u.id ASC',
+                '', '', '', '', false, true)) {
+            $users = sort_by_roleassignment_authority($users, $context);
+            $teacher = array_shift($users);
+        }
+
+        $coursename = format_string($course->fullname, true, ['context' => $context]);
+        $subject = get_string('enrolmentnew', 'enrol', format_string($course->shortname, true, ['context' => $context]));
+        $send = function($from, $to, $text) use ($subject) {
+            $eventdata = new \core\message\message();
+            $eventdata->modulename        = 'moodle';
+            $eventdata->component         = 'enrol_paystack';
+            $eventdata->name              = 'paystack_enrolment';
+            $eventdata->userfrom          = $from;
+            $eventdata->userto            = $to;
+            $eventdata->subject           = $subject;
+            $eventdata->fullmessage       = $text;
+            $eventdata->fullmessageformat = FORMAT_PLAIN;
+            $eventdata->fullmessagehtml   = '';
+            $eventdata->smallmessage      = '';
+            message_send($eventdata);
+        };
+
+        if ($plugin->get_config('mailstudents')) {
+            $a = new \stdClass();
+            $a->coursename = $coursename;
+            $a->profileurl = "$CFG->wwwroot/user/view.php?id=$user->id";
+            $send(empty($teacher) ? \core_user::get_support_user() : $teacher, $user, get_string('welcometocoursetext', '', $a));
+        }
+
+        $newuser = new \stdClass();
+        $newuser->course = $coursename;
+        $newuser->user = fullname($user);
+        $text = get_string('enrolmentnewuser', 'enrol', $newuser);
+        if ($plugin->get_config('mailteachers') && !empty($teacher)) {
+            $send($user, $teacher, $text);
+        }
+        if ($plugin->get_config('mailadmins')) {
+            foreach (get_admins() as $admin) {
+                $send($user, $admin, $text);
+            }
+        }
     }
 }

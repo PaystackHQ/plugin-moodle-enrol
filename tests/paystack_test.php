@@ -44,4 +44,47 @@ class paystack_test extends \advanced_testcase {
         $paystack = new paystack('moodle-enrol', 'pk', 'sk');
         $this->assertSame(['http' => 0, 'body' => null], $paystack->verify_transaction('../../transfer'));
     }
+
+    public function test_curl_options_hardening_without_proxy(): void {
+        $this->resetAfterTest();
+        set_config('proxyhost', '');
+
+        $options = http::curl_options('https://api.paystack.co/', 7, 3);
+        $this->assertSame(7, $options[CURLOPT_TIMEOUT]);
+        $this->assertSame(3, $options[CURLOPT_CONNECTTIMEOUT]);
+        $this->assertFalse($options[CURLOPT_FOLLOWLOCATION]);
+        $this->assertTrue($options[CURLOPT_SSL_VERIFYPEER]);
+        $this->assertSame(2, $options[CURLOPT_SSL_VERIFYHOST]);
+        $this->assertArrayNotHasKey(CURLOPT_PROXY, $options);
+    }
+
+    public function test_curl_options_use_site_proxy(): void {
+        global $CFG;
+        $this->resetAfterTest();
+        $CFG->proxyhost = 'proxy.example.com';
+        $CFG->proxyport = 3128;
+        $CFG->proxytype = 'HTTP';
+        $CFG->proxyuser = 'user';
+        $CFG->proxypassword = 'pass';
+        $CFG->proxybypass = '';
+
+        $options = http::curl_options('https://api.paystack.co/');
+        $this->assertSame('proxy.example.com:3128', $options[CURLOPT_PROXY]);
+        $this->assertSame(CURLPROXY_HTTP, $options[CURLOPT_PROXYTYPE]);
+        $this->assertSame('user:pass', $options[CURLOPT_PROXYUSERPWD]);
+
+        $CFG->proxytype = 'SOCKS5';
+        $options = http::curl_options('https://api.paystack.co/');
+        $this->assertSame(CURLPROXY_SOCKS5, $options[CURLOPT_PROXYTYPE]);
+    }
+
+    public function test_curl_options_proxy_bypass(): void {
+        global $CFG;
+        $this->resetAfterTest();
+        $CFG->proxyhost = 'proxy.example.com';
+        $CFG->proxybypass = 'api.paystack.co';
+
+        $this->assertArrayNotHasKey(CURLOPT_PROXY, http::curl_options('https://api.paystack.co/'));
+        $this->assertArrayHasKey(CURLOPT_PROXY, http::curl_options('https://plugin-tracker.paystackintegrations.com/'));
+    }
 }

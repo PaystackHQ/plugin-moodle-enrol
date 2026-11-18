@@ -69,8 +69,9 @@ final class util {
      * @param int $http HTTP status of the failed Paystack call
      * @param stdClass $data
      */
-    public static function notify_key_failure(int $http, $data): void
+    public static function notify_key_failure($http, $data)
     {
+        $http = (int) $http;
         if ($http !== 401 && $http !== 403) {
             return;
         }
@@ -84,6 +85,33 @@ final class util {
         }
         set_config('keyfailure_last', time(), 'enrol_paystack');
         self::message_paystack_error_to_admin(get_string("keyfailure_$http", 'enrol_paystack'), $data);
+    }
+
+    /**
+     * Mark the key and secret settings as sensitive for admin presets exports.
+     *
+     * Does nothing when the site has no sensible settings list yet.
+     */
+    public static function register_sensible_settings() {
+        $current = get_config('adminpresets', 'sensiblesettings');
+        if ($current === false) {
+            return;
+        }
+        $have = array_map('trim', explode(',', $current));
+        $missing = [];
+        foreach (['secretkey', 'restrictedkey', 'webhooksecret'] as $name) {
+            foreach (['test', 'live'] as $mode) {
+                $entry = "{$mode}_{$name}@@enrol_paystack";
+                if (!in_array($entry, $have, true)) {
+                    $missing[] = $entry;
+                }
+            }
+        }
+        if ($missing) {
+            $current = trim($current);
+            $joined = ($current === '' ? '' : rtrim($current, ', ') . ', ') . implode(', ', $missing);
+            set_config('sensiblesettings', $joined, 'adminpresets');
+        }
     }
 
     /**

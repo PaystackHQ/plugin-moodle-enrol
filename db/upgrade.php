@@ -45,16 +45,39 @@ function xmldb_enrol_paystack_upgrade($oldversion) {
     }
 
     if ($oldversion < 2026111802) {
-        // Earlier versions logged these values in clear text.
         $names = ['test_secretkey', 'live_secretkey', 'test_restrictedkey', 'live_restrictedkey',
             'test_webhooksecret', 'live_webhooksecret'];
         foreach (['value', 'oldvalue'] as $column) {
             list($insql, $params) = $DB->get_in_or_equal($names);
             array_unshift($params, 'enrol_paystack');
             $DB->execute("UPDATE {config_log} SET $column = '********'
-                           WHERE plugin = ? AND name $insql AND $column IS NOT NULL AND $column <> ''", $params);
+                           WHERE plugin = ? AND name $insql AND " . $DB->sql_isnotempty('config_log', $column, true, true), $params);
         }
         upgrade_plugin_savepoint(true, 2026111802, 'enrol', 'paystack');
+    }
+
+    if ($oldversion < 2026111804) {
+        if (get_config('enrol_paystack', 'replayguard_since') === false) {
+            set_config('replayguard_since', time(), 'enrol_paystack');
+        }
+
+        \enrol_paystack\util::register_sensible_settings();
+
+        if ($dbman->table_exists('logstore_standard_log')) {
+            $conditions = ['eventname = ?'];
+            $params = ['\\core\\event\\config_log_created'];
+            $conditions[] = $DB->sql_like('other', '?', false);
+            $params[] = '%enrol_paystack%';
+            $secret = [];
+            foreach (['secretkey', 'restrictedkey', 'webhooksecret'] as $name) {
+                $secret[] = $DB->sql_like('other', '?', false);
+                $params[] = "%$name%";
+            }
+            $conditions[] = '(' . implode(' OR ', $secret) . ')';
+            $DB->delete_records_select('logstore_standard_log', implode(' AND ', $conditions), $params);
+        }
+
+        upgrade_plugin_savepoint(true, 2026111804, 'enrol', 'paystack');
     }
 
     return true;

@@ -42,10 +42,10 @@ if (!enrol_is_enabled('paystack')) {
     throw new moodle_exception('errdisabled', 'enrol_paystack');
 }
 
-// Keep out casual intruders.
+// Unauthenticated callers get no detail and leave no log trace.
 if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HTTP_PAYSTACK_SIGNATURE', $_SERVER)) {
     http_response_code(400);
-    throw new moodle_exception('invalidrequest', 'core_error');
+    exit;
 }
 
 $plugin = enrol_get_plugin('paystack');
@@ -54,7 +54,7 @@ $input = @file_get_contents("php://input");
 // Authenticate the raw body before parsing it.
 if (!\enrol_paystack\webhook_signature::is_authentic($input, $_SERVER, time(), $plugin->get_webhooksecret())) {
     http_response_code(400);
-    throw new moodle_exception('invalidrequest', 'core_error');
+    exit;
 }
 
 $values = (array) json_decode($input, true);
@@ -67,169 +67,23 @@ if (($values['event'] ?? null) !== 'charge.success') {
 
 // Only used to locate the transaction; everything authoritative comes from the verify response.
 $reference = $values['data']['reference'] ?? null;
-if (!is_string($reference) || $reference === '') {
-    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Missing reference');
+if (!\enrol_paystack\paystack::is_valid_reference($reference)) {
+    error_log('enrol_paystack webhook: invalid transaction reference');
+    http_response_code(200);
+    exit;
 }
-
-$data = new stdClass();
-$data->reference = $reference;
 
 $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
 
-// Verify Transaction
 $res = $paystack->verify_transaction($reference);
 $body = $res['body'];
 
-if ($res['http'] >= 200 && $res['http'] <= 299 && !empty($body['status']) && isset($body['data']) && is_array($body['data'])) {
-    $txdata = $body['data'];
-
-    $ids = \enrol_paystack\enrolment::parse_custom($txdata['metadata'] ?? null);
-    if ($ids === null) {
-        \enrol_paystack\util::message_paystack_error_to_admin("Webhook Stopped: invalid transaction metadata", $data);
-        die;
+if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset($body['data']) || !is_array($body['data'])) {
+    if ($res['http'] === 401 || $res['http'] === 403) {
+        \enrol_paystack\util::notify_key_failure($res['http'], (object) ['reference' => $reference]);
+        http_response_code(500);
+        exit;
     }
-
-    $data->userid           = $ids['userid'];
-    $data->courseid         = $ids['courseid'];
-    $data->instanceid       = $ids['instanceid'];
-    $data->timeupdated      = time();
-
-    // Get the user and course records.
-    $user = $DB->get_record("user", array("id" => $data->userid), "*", MUST_EXIST);
-    $course = $DB->get_record("course", array("id" => $data->courseid), "*", MUST_EXIST);
-    $context = context_course::instance($course->id, MUST_EXIST);
-
-    $PAGE->set_context($context);
-
-    // Use the queried course's full name for the item_name field.
-    $data->item_name = $course->fullname;
-
-    $plugin_instance = $DB->get_record("enrol", array("id" => $data->instanceid, "enrol" => "paystack", "status" => 0), "*", MUST_EXIST);
-
-    $data->payment_gross    = ((int) ($txdata['amount'] ?? 0)) / 100;
-    $data->payment_currency = $txdata['currency'] ?? null;
-    $data->tax              = ((int) ($txdata['amount'] ?? 0)) / 100;
-    $data->memo             = $txdata['gateway_response'] ?? null;
-    $data->payment_status   = $txdata['status'] ?? null;
-    $data->txn_id           = $reference;
-
-    if (is_enrolled($context, $data->userid, '', true)) {
-        \enrol_paystack\util::message_paystack_error_to_admin(
-            "Webhook Stopped: User already enrolled",
-            $data
-        );
-        die;
-    }
-
-    $cost = \enrol_paystack\enrolment::resolve_cost($plugin_instance, $plugin->get_config('cost'));
-    $problem = \enrol_paystack\enrolment::check_payment($txdata, $plugin_instance, $cost);
-    if ($problem !== null) {
-        \enrol_paystack\util::message_paystack_error_to_admin($problem, $data);
-        die;
-    }
-
-    if (\enrol_paystack\enrolment::reference_used($reference)) {
-        \enrol_paystack\util::message_paystack_error_to_admin("Webhook Stopped: reference already used", $data);
-        die;
-    }
-
-    if ($data->payment_status == 'success') {
-        // ALL CLEAR !
-        $paystack->log_transaction_success($data->reference);
-
-        $DB->insert_record("enrol_paystack", $data);
-
-        if ($plugin_instance->enrolperiod) {
-            $timestart = time();
-            $timeend   = $timestart + $plugin_instance->enrolperiod;
-        } else {
-            $timestart = 0;
-            $timeend   = 0;
-        }
-        // Enrol user.
-        $plugin->enrol_user($plugin_instance, $user->id, $plugin_instance->roleid, $timestart, $timeend);
-        // Pass $view=true to filter hidden caps if the user cannot see them.
-        if ($users = get_users_by_capability(
-            $context,
-            'moodle/course:update',
-            'u.*',
-            'u.id ASC',
-            '',
-            '',
-            '',
-            '',
-            false,
-            true
-        )) {
-            $users = sort_by_roleassignment_authority($users, $context);
-            $teacher = array_shift($users);
-        } else {
-            $teacher = false;
-        }
-        $mailstudents = $plugin->get_config('mailstudents');
-        $mailteachers = $plugin->get_config('mailteachers');
-        $mailadmins   = $plugin->get_config('mailadmins');
-        $shortname = format_string($course->shortname, true, array('context' => $context));
-        if (!empty($mailstudents)) {
-            $a = new stdClass();
-            $a->coursename = format_string($course->fullname, true, array('context' => $context));
-            $a->profileurl = "$CFG->wwwroot/user/view.php?id=$user->id";
-            $eventdata = new \core\message\message();
-            $eventdata->modulename        = 'moodle';
-            $eventdata->component         = 'enrol_paystack';
-            $eventdata->name              = 'paystack_enrolment';
-            $eventdata->userfrom          = empty($teacher) ? core_user::get_support_user() : $teacher;
-            $eventdata->userto            = $user;
-            $eventdata->subject           = get_string("enrolmentnew", 'enrol', $shortname);
-            $eventdata->fullmessage       = get_string('welcometocoursetext', '', $a);
-            $eventdata->fullmessageformat = FORMAT_PLAIN;
-            $eventdata->fullmessagehtml   = '';
-            $eventdata->smallmessage      = '';
-            message_send($eventdata);
-        }
-        if (!empty($mailteachers) && !empty($teacher)) {
-            $a->course = format_string($course->fullname, true, array('context' => $context));
-            $a->user = fullname($user);
-            $eventdata = new \core\message\message();
-            $eventdata->modulename        = 'moodle';
-            $eventdata->component         = 'enrol_paystack';
-            $eventdata->name              = 'paystack_enrolment';
-            $eventdata->userfrom          = $user;
-            $eventdata->userto            = $teacher;
-            $eventdata->subject           = get_string("enrolmentnew", 'enrol', $shortname);
-            $eventdata->fullmessage       = get_string('enrolmentnewuser', 'enrol', $a);
-            $eventdata->fullmessageformat = FORMAT_PLAIN;
-            $eventdata->fullmessagehtml   = '';
-            $eventdata->smallmessage      = '';
-            message_send($eventdata);
-        }
-        if (!empty($mailadmins)) {
-            $a->course = format_string($course->fullname, true, array('context' => $context));
-            $a->user = fullname($user);
-            $admins = get_admins();
-            foreach ($admins as $admin) {
-                $eventdata = new \core\message\message();
-                $eventdata->modulename        = 'moodle';
-                $eventdata->component         = 'enrol_paystack';
-                $eventdata->name              = 'paystack_enrolment';
-                $eventdata->userfrom          = $user;
-                $eventdata->userto            = $admin;
-                $eventdata->subject           = get_string("enrolmentnew", 'enrol', $shortname);
-                $eventdata->fullmessage       = get_string('enrolmentnewuser', 'enrol', $a);
-                $eventdata->fullmessageformat = FORMAT_PLAIN;
-                $eventdata->fullmessagehtml   = '';
-                $eventdata->smallmessage      = '';
-                message_send($eventdata);
-            }
-        }
-    } else {
-        \enrol_paystack\util::message_paystack_error_to_admin(
-            "Payment status not successful" . $data->memo,
-            $data
-        );
-        die;
-    }
-} else {
     if ($res['http'] === 0 || $res['http'] === 429 || $res['http'] >= 500) {
         // Transient: let Paystack retry.
         http_response_code(500);
@@ -239,3 +93,6 @@ if ($res['http'] >= 200 && $res['http'] <= 299 && !empty($body['status']) && iss
     http_response_code(200);
     exit;
 }
+
+$result = \enrol_paystack\enrolment::process($body['data'], $reference, 'webhook', null, $paystack);
+http_response_code($result === 'busy' ? 500 : 200);
