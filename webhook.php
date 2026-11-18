@@ -50,36 +50,15 @@ if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HT
 
 $input = @file_get_contents("php://input");
 $values = (array) json_decode($input, true);
-$metadata = $values['data']['metadata'] ?? [];
-if (!is_array($metadata)) {
-    $metadata = [];
+
+// Only used to locate the transaction; everything authoritative comes from the verify response.
+$reference = $values['data']['reference'] ?? null;
+if (!is_string($reference) || $reference === '') {
+    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Missing reference');
 }
 
 $data = new stdClass();
-
-foreach ($metadata as $key => $value) {
-    if ($key !== clean_param($key, PARAM_ALPHANUMEXT)) {
-        throw new moodle_exception('invalidrequest', 'core_error', '', null, $key);
-    }
-    if (is_array($value)) {
-        throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Unexpected array param: ' . $key);
-    }
-    $data->$key = fix_utf8($value);
-}
-if (empty($data->custom)) {
-    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Missing request param: custom');
-}
-$custom = explode('-', $data->custom);
-unset($data->custom);
-if (empty($custom) || count($custom) < 3) {
-    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Invalid value of the request param: custom');
-}
-$data->userid           = (int) $custom[0];
-$data->courseid         = (int) $custom[1];
-$data->instanceid       = (int) $custom[2];
-$data->payment_gross    = $data->amount;
-$data->payment_currency = $data->currency_code;
-$data->timeupdated      = time();
+$data->reference = $reference;
 
 $plugin = enrol_get_plugin('paystack');
 $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
@@ -90,60 +69,59 @@ if($paystack->validate_webhook($input)){
     throw new moodle_exception('invalidrequest', 'core_error');
 }
 
-// Get the user and course records.
-$user = $DB->get_record("user", array("id" => $data->userid), "*", MUST_EXIST);
-$course = $DB->get_record("course", array("id" => $data->courseid), "*", MUST_EXIST);
-$context = context_course::instance($course->id, MUST_EXIST);
+// Verify Transaction
+$res = $paystack->verify_transaction($reference);
 
-$PAGE->set_context($context);
+if (!empty($res['status']) && !empty($res['data']) && is_array($res['data'])) {
+    $txdata = $res['data'];
 
-// Use the queried course's full name for the item_name field.
-$data->item_name = $course->fullname;
+    $ids = \enrol_paystack\enrolment::parse_custom($txdata['metadata'] ?? null);
+    if ($ids === null) {
+        \enrol_paystack\util::message_paystack_error_to_admin("Webhook Stopped: invalid transaction metadata", $data);
+        die;
+    }
 
-$plugin_instance = $DB->get_record("enrol", array("id" => $data->instanceid, "enrol" => "paystack", "status" => 0), "*", MUST_EXIST);
+    $data->userid           = $ids['userid'];
+    $data->courseid         = $ids['courseid'];
+    $data->instanceid       = $ids['instanceid'];
+    $data->timeupdated      = time();
 
-if (is_enrolled($context, $data->userid, '', true)) {
-    \enrol_paystack\util::message_paystack_error_to_admin(
-        "Webhook Stopped: User already enrolled",
-        $data
-    );
-    die;
-}
+    // Get the user and course records.
+    $user = $DB->get_record("user", array("id" => $data->userid), "*", MUST_EXIST);
+    $course = $DB->get_record("course", array("id" => $data->courseid), "*", MUST_EXIST);
+    $context = context_course::instance($course->id, MUST_EXIST);
 
-// Verify Transaction 
-$res = $paystack->verify_transaction($data->reference);
+    $PAGE->set_context($context);
 
-if (!empty($res['status'])) {
-    // Send the file, this line will be reached if no error was thrown above.
-    $data->tax = $res['data']['amount'] / 100;
-    $data->memo = $res['data']['gateway_response'];
-    $data->payment_status = $res['data']['status'];
+    // Use the queried course's full name for the item_name field.
+    $data->item_name = $course->fullname;
 
-    // If currency is incorrectly set then someone maybe trying to cheat the system
-    if ($data->currency_code != $plugin_instance->currency) {
+    $plugin_instance = $DB->get_record("enrol", array("id" => $data->instanceid, "enrol" => "paystack", "status" => 0), "*", MUST_EXIST);
+
+    $data->payment_gross    = ((int) ($txdata['amount'] ?? 0)) / 100;
+    $data->payment_currency = $txdata['currency'] ?? null;
+    $data->tax              = ((int) ($txdata['amount'] ?? 0)) / 100;
+    $data->memo             = $txdata['gateway_response'] ?? null;
+    $data->payment_status   = $txdata['status'] ?? null;
+    $data->txn_id           = $reference;
+
+    if (is_enrolled($context, $data->userid, '', true)) {
         \enrol_paystack\util::message_paystack_error_to_admin(
-            "Currency does not match course settings, received: " . $data->currency_code,
+            "Webhook Stopped: User already enrolled",
             $data
         );
         die;
     }
 
-    // Check that amount paid is the correct amount
-    if ((float) $plugin_instance->cost <= 0) {
-        $cost = (float) $plugin->get_config('cost');
-    } else {
-        $cost = (float) $plugin_instance->cost;
+    $cost = \enrol_paystack\enrolment::resolve_cost($plugin_instance, $plugin->get_config('cost'));
+    $problem = \enrol_paystack\enrolment::check_payment($txdata, $plugin_instance, $cost);
+    if ($problem !== null) {
+        \enrol_paystack\util::message_paystack_error_to_admin($problem, $data);
+        die;
     }
 
-    // Use the same rounding of floats as on the enrol form.
-    $cost = format_float($cost, 2, false);
-
-    // If cost is greater than payment_gross, then someone maybe trying to cheat the system
-    if ($data->payment_gross < $cost) {
-        \enrol_paystack\util::message_paystack_error_to_admin(
-            "Amount paid is not enough ($data->payment_gross < $cost))",
-            $data
-        );
+    if (\enrol_paystack\enrolment::reference_used($reference)) {
+        \enrol_paystack\util::message_paystack_error_to_admin("Webhook Stopped: reference already used", $data);
         die;
     }
 

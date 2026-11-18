@@ -32,6 +32,7 @@
             <INDEXES>
                 <INDEX NAME="business" UNIQUE="false" FIELDS="business"/>
                 <INDEX NAME="receiver_email" UNIQUE="false" FIELDS="receiver_email"/>
+                <INDEX NAME="txn_id" UNIQUE="false" FIELDS="txn_id"/>
             </INDEXES>
         </TABLE>
     </TABLES>

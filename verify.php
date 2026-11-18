@@ -70,20 +70,29 @@ foreach ($_POST as $key => $value) {
     $data->$key = fix_utf8($value);
 }
 
-if (empty($data->custom)) {
-    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Missing request param: custom');
+if (empty($data->reference)) {
+    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Missing request param: reference');
 }
-$custom = explode('-', $data->custom);
-unset($data->custom);
-if (empty($custom) || count($custom) < 3) {
-    throw new moodle_exception('invalidrequest', 'core_error', '', null, 'Invalid value of the request param: custom');
+unset($data->custom, $data->id);
+
+$plugin = enrol_get_plugin('paystack');
+$paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
+
+// Everything below is taken from the verified transaction, never from the POST body.
+$res = $paystack->verify_transaction($data->reference);
+if (empty($res['status']) || empty($res['data']) || !is_array($res['data'])) {
+    notice(get_string('paystack_sorry', 'enrol_paystack'), $CFG->wwwroot . '/');
+}
+$txdata = $res['data'];
+
+$ids = \enrol_paystack\enrolment::parse_custom($txdata['metadata'] ?? null);
+if ($ids === null || $ids['userid'] !== (int) $USER->id) {
+    notice(get_string('paystack_sorry', 'enrol_paystack'), $CFG->wwwroot . '/');
 }
 
-$data->userid           = (int) $custom[0];
-$data->courseid         = (int) $custom[1];
-$data->instanceid       = (int) $custom[2];
-$data->payment_gross    = $data->amount;
-$data->payment_currency = $data->currency_code;
+$data->userid           = $ids['userid'];
+$data->courseid         = $ids['courseid'];
+$data->instanceid       = $ids['instanceid'];
 $data->timeupdated      = time();
 
 // Get the user and course records.
@@ -96,58 +105,34 @@ $PAGE->set_context($context);
 $data->item_name = $course->fullname;
 
 $plugin_instance = $DB->get_record("enrol", array("id" => $data->instanceid, "enrol" => "paystack", "status" => 0), "*", MUST_EXIST);
-$plugin = enrol_get_plugin('paystack');
-$paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
 
-// Set Course and Paystack Url
+// Set Course Url
 $courseUrl = "$CFG->wwwroot/course/view.php?id=$course->id";
 
-// Verify Transaction 
-$res = $paystack->verify_transaction($data->reference);
+$data->payment_gross    = ((int) ($txdata['amount'] ?? 0)) / 100;
+$data->payment_currency = $txdata['currency'] ?? null;
+$data->tax              = ((int) ($txdata['amount'] ?? 0)) / 100;
+$data->memo             = $txdata['gateway_response'] ?? null;
+$data->payment_status   = $txdata['status'] ?? null;
+$data->reason_code      = null;
+$data->txn_id           = $data->reference;
 
-if (empty($res['status'])) {
-    notice($res['message'] ?? get_string('paystack_sorry', 'enrol_paystack'), $courseUrl);
-}
-
-// Send the file, this line will be reached if no error was thrown above.
-$data->tax = $res['data']['amount'] / 100;
-$data->memo = $res['data']['gateway_response'];
-$data->payment_status = $res['data']['status'];
-$data->reason_code = null;
-// If currency is incorrectly set then someone maybe trying to cheat the system
-if ($data->currency_code != $plugin_instance->currency) {
-    $message = "Currency does not match course settings, received: " . $data->currency_code;
-    \enrol_paystack\util::message_paystack_error_to_admin(
-        $message,
-        $data
-    );
-    notice($message, $courseUrl);
-}
-
-// Check that amount paid is the correct amount
-if ((float) $plugin_instance->cost <= 0) {
-    $cost = (float) $plugin->get_config('cost');
-} else {
-    $cost = (float) $plugin_instance->cost;
-}
-
-// Use the same rounding of floats as on the enrol form.
-$cost = format_float($cost, 2, false);
-
-// If cost is greater than payment_gross, then someone maybe trying to cheat the system
-if ($data->payment_gross < $cost) {
-    $message = "Amount paid is not enough ($data->payment_gross < $cost))";
-    \enrol_paystack\util::message_paystack_error_to_admin(
-        $message,
-        $data
-    );
-    notice($message, $courseUrl);
+$cost = \enrol_paystack\enrolment::resolve_cost($plugin_instance, $plugin->get_config('cost'));
+$problem = \enrol_paystack\enrolment::check_payment($txdata, $plugin_instance, $cost);
+if ($problem !== null) {
+    \enrol_paystack\util::message_paystack_error_to_admin($problem, $data);
+    notice(get_string('paystack_sorry', 'enrol_paystack'), $courseUrl);
 }
 
 $fullname = format_string($course->fullname, true, array('context' => $context));
 
 if (is_enrolled($context, null, '', true)) {
     redirect($courseUrl, get_string('paymentthanks', '', $fullname));
+}
+
+if (\enrol_paystack\enrolment::reference_used($data->reference)) {
+    \enrol_paystack\util::message_paystack_error_to_admin('Payment reference already used', $data);
+    notice(get_string('paystack_sorry', 'enrol_paystack'), $courseUrl);
 }
 
 if ($data->payment_status == 'success') {
