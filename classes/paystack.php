@@ -151,15 +151,4 @@ class paystack
         // execute post
         curl_exec($curl);
     }
-
-    /**
-     * Validate Webhook Signature
-     *
-     * @param $input
-     * @return boolean
-     */
-    public function validate_webhook($input)
-    {
-        return !hash_equals(hash_hmac('sha512', $input, (string) $this->secret_key), $_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] ?? '');
-    }
 }

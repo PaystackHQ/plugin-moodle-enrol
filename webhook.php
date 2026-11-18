@@ -43,13 +43,27 @@ if (!enrol_is_enabled('paystack')) {
 }
 
 // Keep out casual intruders.
-if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HTTP_X_PAYSTACK_SIGNATURE', $_SERVER)) {
+if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HTTP_PAYSTACK_SIGNATURE', $_SERVER)) {
     http_response_code(400);
     throw new moodle_exception('invalidrequest', 'core_error');
 }
 
+$plugin = enrol_get_plugin('paystack');
 $input = @file_get_contents("php://input");
+
+// Authenticate the raw body before parsing it.
+if (!\enrol_paystack\webhook_signature::is_authentic($input, $_SERVER, time(), $plugin->get_webhooksecret())) {
+    http_response_code(400);
+    throw new moodle_exception('invalidrequest', 'core_error');
+}
+
 $values = (array) json_decode($input, true);
+
+// Acknowledge other events (e.g. the dashboard ping) without processing them.
+if (($values['event'] ?? null) !== 'charge.success') {
+    http_response_code(200);
+    exit;
+}
 
 // Only used to locate the transaction; everything authoritative comes from the verify response.
 $reference = $values['data']['reference'] ?? null;
@@ -60,14 +74,7 @@ if (!is_string($reference) || $reference === '') {
 $data = new stdClass();
 $data->reference = $reference;
 
-$plugin = enrol_get_plugin('paystack');
 $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
-
-// validate event do all at once to avoid timing attack
-if($paystack->validate_webhook($input)){
-    http_response_code(400);
-    throw new moodle_exception('invalidrequest', 'core_error');
-}
 
 // Verify Transaction
 $res = $paystack->verify_transaction($reference);
