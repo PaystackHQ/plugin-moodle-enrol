@@ -43,21 +43,22 @@ class admin_setting_secretkey extends admin_setting_secret
         if (restricted_key::is_rk($data) || strpos($data, 'rk_') === 0) {
             return get_string('sk_put_rk_above', 'enrol_paystack');
         }
-        return true;
-    }
-
-    public function write_setting($data) {
-        $data = trim($data);
-        if ($data !== '' && !empty(admin_setting_restrictedkey::$saved_this_request[$this->mode])) {
-            return get_string('sk_one_key_per_mode', 'enrol_paystack',
+        if (restricted_key::key_type($data) !== 'sk') {
+            return get_string('sk_invalid', 'enrol_paystack');
+        }
+        $keymode = restricted_key::key_mode($data);
+        if ($keymode !== $this->mode) {
+            return get_string('sk_wrong_mode', 'enrol_paystack', (object) array(
+                'key' => get_string('rk_mode_' . $keymode, 'enrol_paystack'),
+                'field' => get_string($keymode . '_secretkey', 'enrol_paystack'),
+            ));
+        }
+        // The restricted key setting sits earlier on the page, so a removal in this save is already applied.
+        $typed = trim(optional_param('s_enrol_paystack_' . $this->mode . '_restrictedkey', '', PARAM_RAW));
+        if (enrol_get_plugin('paystack')->has_restricted_key($this->mode) || $typed !== '') {
+            return get_string('sk_remove_rk_first', 'enrol_paystack',
                 get_string('rk_mode_' . $this->mode, 'enrol_paystack'));
         }
-        $result = parent::write_setting($data);
-        if ($data !== '' && $result === '') {
-            foreach (array('restrictedkey', 'rkpublickey', 'rkchecked') as $suffix) {
-                set_config($this->mode . '_' . $suffix, '', 'enrol_paystack');
-            }
-        }
-        return $result;
+        return true;
     }
 }

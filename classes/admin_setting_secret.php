@@ -31,15 +31,28 @@ require_once($CFG->libdir . '/adminlib.php');
 
 abstract class admin_setting_secret extends \admin_setting_configpasswordunmask
 {
+    const LAST4_MIN_LENGTH = 20;
+
+    /** Admin search must never match the stored secret. */
+    public function is_related($query) {
+        return strpos(strtolower($this->name), $query) !== false
+            || strpos(\core_text::strtolower($this->visiblename), $query) !== false
+            || strpos(\core_text::strtolower($this->description), $query) !== false;
+    }
+
     public function output_html($data, $query = '') {
         $stored = (string) $this->get_setting();
         $description = $this->description;
         if ($stored !== '') {
-            $last4 = restricted_key::last4($stored);
+            $last4 = $this->last4($stored);
             $note = $last4 === null ?
                 get_string('secret_saved', 'enrol_paystack') :
-                get_string('secret_saved_last4', 'enrol_paystack', $last4);
-            $this->description = $description . ' ' . $note;
+                get_string('secret_saved_last4', 'enrol_paystack', s($last4));
+            $id = 'id_enrol_paystack_remove_' . $this->name;
+            $remove = '<div class="form-check mt-2"><input type="checkbox" class="form-check-input" id="' . $id .
+                '" name="enrol_paystack_remove_' . $this->name . '" value="1"> <label class="form-check-label" for="' .
+                $id . '">' . get_string('secret_remove', 'enrol_paystack') . '</label></div>';
+            $this->description = $description . ' ' . $note . $remove;
         }
         $html = parent::output_html('', $query);
         $this->description = $description;
@@ -47,6 +60,10 @@ abstract class admin_setting_secret extends \admin_setting_configpasswordunmask
     }
 
     public function write_setting($data) {
+        $removal = $this->handle_removal();
+        if ($removal !== null) {
+            return $removal;
+        }
         $data = trim($data);
         $stored = (string) $this->get_setting();
         if ($data === '' && $stored !== '') {
@@ -59,5 +76,28 @@ abstract class admin_setting_secret extends \admin_setting_configpasswordunmask
             }
         }
         return $this->config_write($this->name, $data) ? '' : get_string('errorsetting', 'admin');
+    }
+
+    /**
+     * Clears the value when the "Remove the saved key" box is ticked, whatever else was typed.
+     *
+     * @return string|null Error message, '' on success, null when removal was not requested.
+     */
+    protected function handle_removal() {
+        if (!optional_param('enrol_paystack_remove_' . $this->name, 0, PARAM_BOOL)) {
+            return null;
+        }
+        if (!$this->config_write($this->name, '')) {
+            return get_string('errorsetting', 'admin');
+        }
+        $this->on_removed();
+        return '';
+    }
+
+    protected function on_removed() {
+    }
+
+    protected function last4($key) {
+        return strlen($key) >= self::LAST4_MIN_LENGTH ? substr($key, -4) : null;
     }
 }

@@ -51,8 +51,7 @@ if ($ADMIN->fulltree) {
         $warnings[] = get_string('warning_nowebhooksecret', 'enrol_paystack', $activemode);
     }
     foreach (['test', 'live'] as $keymode) {
-        $rk = trim((string) ($paystackconfig->{"{$keymode}_restrictedkey"} ?? ''));
-        if ($rk !== '' && ($paystackconfig->{"{$keymode}_rkchecked"} ?? '') !== hash('sha256', $rk)) {
+        if ($paystackplugin->has_restricted_key($keymode) && !$paystackplugin->is_rk_checked($keymode)) {
             $warnings[] = get_string('warning_rkunchecked', 'enrol_paystack', $keymode);
         }
         if (strpos((string) ($paystackconfig->{"{$keymode}_secretkey"} ?? ''), 'rk_') === 0) {

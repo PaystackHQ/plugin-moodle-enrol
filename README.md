@@ -49,7 +49,7 @@ When you save, the plugin checks the key with Paystack and refuses it, naming wh
 
 A restricted key replaces that mode's secret key. Once it is saved, roll your secret key in the Paystack Dashboard. You can still use a secret key and public key instead, under **Use secret keys instead**, if you can't use a restricted key.
 
-Saved keys are never shown again; the page shows only their last four characters. Leave a field blank to keep the saved key.
+Saved keys are never shown again; the page shows only their last four characters. Leave a field blank to keep the saved key. To delete a saved key, tick **Remove the saved key** under its field and save. A secret key can't be saved while a restricted key is saved for the same mode: remove the restricted key first.
 
 The permission check runs only when a key is saved on the settings page. A key set with `admin/cli/cfg.php` or `$CFG->forced_plugin_settings` isn't checked, and the settings page warns about it.
 
@@ -60,6 +60,12 @@ Webhooks are accepted only when they are signed with your **webhook signing secr
 Without a signing secret, every webhook is rejected and the settings page shows a warning. Students who complete payment are still enrolled when they return from checkout.
 
 **Upgrading from 1.4.x:** webhooks are no longer checked with your secret key. Add a webhook signing secret after upgrading, or webhooks will stop enrolling students who close the payment window before returning to Moodle.
+
+After upgrading, also:
+
+- Roll your secret key in the Paystack Dashboard. Older versions logged keys in plain text in the Moodle configuration log; the upgrade removes those entries, but the old keys should be treated as exposed.
+- Don't set keys with `admin/cli/cfg.php`: it writes them to the configuration log unmasked.
+- If you have local customisations: `paystack::validate_webhook()` was removed, and `paystack::verify_transaction()` now returns `['http' => …, 'body' => …]`.
 
 
 

@@ -105,6 +105,81 @@ class enrol_paystack_plugin extends enrol_plugin
     }
 
     /**
+     * Fingerprint recorded when a restricted key passes the permission check.
+     *
+     * @param string $key
+     * @return string
+     */
+    public static function rk_fingerprint($key)
+    {
+        return hash('sha256', (string) $key);
+    }
+
+    /**
+     * Whether a restricted key is stored for the mode.
+     *
+     * @param string $mode 'test' or 'live'
+     * @return bool
+     */
+    public function has_restricted_key($mode)
+    {
+        return trim((string) get_config('enrol_paystack', $mode . '_restrictedkey')) !== '';
+    }
+
+    /**
+     * Whether the stored restricted key is the one that passed the permission check.
+     *
+     * @param string $mode 'test' or 'live'
+     * @return bool
+     */
+    public function is_rk_checked($mode)
+    {
+        $key = trim((string) get_config('enrol_paystack', $mode . '_restrictedkey'));
+        return $key !== '' && get_config('enrol_paystack', $mode . '_rkchecked') === self::rk_fingerprint($key);
+    }
+
+    /**
+     * Records the companions of a restricted key that passed the check and drops that mode's secret key.
+     * The key itself is written by the admin setting, which masks it in the config log.
+     *
+     * @param string $mode 'test' or 'live'
+     * @param string $key
+     * @param string $publickey public key Paystack reported for the key
+     */
+    public function set_restricted_key($mode, $key, $publickey)
+    {
+        $this->set_config($mode . '_rkpublickey', (string) $publickey);
+        $this->set_config($mode . '_rkchecked', self::rk_fingerprint($key));
+        $this->clear_secret_key($mode);
+    }
+
+    /**
+     * Drops the companions of a removed restricted key.
+     *
+     * @param string $mode 'test' or 'live'
+     */
+    public function clear_restricted_key($mode)
+    {
+        $this->set_config($mode . '_rkpublickey', '');
+        $this->set_config($mode . '_rkchecked', '');
+    }
+
+    /**
+     * Clears the secret key for the mode, logging the change without the value.
+     *
+     * @param string $mode 'test' or 'live'
+     */
+    public function clear_secret_key($mode)
+    {
+        $name = $mode . '_secretkey';
+        $old = (string) get_config('enrol_paystack', $name);
+        $this->set_config($name, '');
+        if ($old !== '') {
+            add_to_config_log($name, '********', '', 'enrol_paystack');
+        }
+    }
+
+    /**
      * Defines if user can be managed from admin.
      *
      * @param  stdClass $instance course enrol instance

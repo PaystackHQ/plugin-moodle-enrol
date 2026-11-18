@@ -29,7 +29,6 @@ defined('MOODLE_INTERNAL') || die();
 final class restricted_key
 {
     const RK_MAX_LENGTH = 256;
-    const LAST4_MIN_LENGTH = 20;
     const CONCURRENCY = 5;
     const BASE_URL = 'https://api.paystack.co/';
     const SCOPE_DENIED_MESSAGE = 'This restricted key is not permitted to perform this action';
@@ -104,13 +103,6 @@ final class restricted_key
             return 'sk';
         }
         return 'other';
-    }
-
-    public static function last4($key) {
-        if (is_string($key) && strlen($key) >= self::LAST4_MIN_LENGTH) {
-            return substr($key, -4);
-        }
-        return null;
     }
 
     private static function message_of($body) {

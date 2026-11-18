@@ -28,12 +28,6 @@ defined('MOODLE_INTERNAL') || die();
 
 class admin_setting_restrictedkey extends admin_setting_secret
 {
-    /** @var callable|null Replaces restricted_key::validate (PHPUnit). */
-    public static $validator = null;
-
-    /** @var bool[] Modes whose restricted key was saved during this request. */
-    public static $saved_this_request = array();
-
     /** @var string 'test' or 'live'. */
     private $mode;
 
@@ -43,6 +37,10 @@ class admin_setting_restrictedkey extends admin_setting_secret
     }
 
     public function write_setting($data) {
+        $removal = $this->handle_removal();
+        if ($removal !== null) {
+            return $removal;
+        }
         $data = trim($data);
         $stored = (string) $this->get_setting();
         if ($data === '') {
@@ -63,18 +61,18 @@ class admin_setting_restrictedkey extends admin_setting_secret
         if ($keymode !== $this->mode) {
             return $this->refuse(get_string('rk_wrong_mode', 'enrol_paystack', (object) array(
                 'key' => self::mode_name($keymode),
-                'field' => get_string($this->mode . '_restrictedkey', 'enrol_paystack'),
+                'field' => get_string($keymode . '_restrictedkey', 'enrol_paystack'),
             )));
         }
 
-        $hash = hash('sha256', $data);
-        if ($data === $stored && get_config('enrol_paystack', $this->mode . '_rkchecked') === $hash) {
+        $plugin = enrol_get_plugin('paystack');
+        if ($data === $stored && $plugin->is_rk_checked($this->mode)) {
             return '';
         }
 
-        $validator = self::$validator;
-        $options = array('curl_options' => self::proxy_curl_options());
-        $verdict = $validator ? call_user_func($validator, $data, $options) : restricted_key::validate($data, $options);
+        $verdict = $this->run_validator($data, array(
+            'curl_options' => http::curl_options(restricted_key::BASE_URL, 5, 3),
+        ));
         $code = isset($verdict['code']) ? $verdict['code'] : 'unverifiable';
 
         if ($code !== 'ok') {
@@ -84,11 +82,16 @@ class admin_setting_restrictedkey extends admin_setting_secret
         if (!$this->config_write($this->name, $data)) {
             return get_string('errorsetting', 'admin');
         }
-        set_config($this->mode . '_rkpublickey', (string) $verdict['public_key'], 'enrol_paystack');
-        set_config($this->mode . '_rkchecked', $hash, 'enrol_paystack');
-        set_config($this->mode . '_secretkey', '', 'enrol_paystack');
-        self::$saved_this_request[$this->mode] = true;
+        $plugin->set_restricted_key($this->mode, $data, $verdict['public_key']);
         return '';
+    }
+
+    protected function run_validator($key, array $options) {
+        return restricted_key::validate($key, $options);
+    }
+
+    protected function on_removed() {
+        enrol_get_plugin('paystack')->clear_restricted_key($this->mode);
     }
 
     private function refuse($message) {
@@ -131,36 +134,5 @@ class admin_setting_restrictedkey extends admin_setting_secret
                 get_string('rk_scope_' . $scope, 'enrol_paystack') : s($scope);
         }
         return implode(', ', $names);
-    }
-
-    private static function proxy_curl_options() {
-        global $CFG;
-        if (empty($CFG->proxyhost)) {
-            return array();
-        }
-        if (!empty($CFG->proxybypass)) {
-            foreach (explode(',', $CFG->proxybypass) as $entry) {
-                $entry = strtolower(trim($entry));
-                if ($entry === '') {
-                    continue;
-                }
-                $suffix = ltrim($entry, '*.');
-                if ('api.paystack.co' === $entry || $suffix !== '' &&
-                        substr('api.paystack.co', -strlen('.' . $suffix)) === '.' . $suffix) {
-                    return array();
-                }
-            }
-        }
-        $options = array(CURLOPT_PROXY => $CFG->proxyhost);
-        if (!empty($CFG->proxyport)) {
-            $options[CURLOPT_PROXYPORT] = (int) $CFG->proxyport;
-        }
-        if (!empty($CFG->proxytype) && $CFG->proxytype === 'SOCKS5') {
-            $options[CURLOPT_PROXYTYPE] = CURLPROXY_SOCKS5;
-        }
-        if (!empty($CFG->proxyuser)) {
-            $options[CURLOPT_PROXYUSERPWD] = $CFG->proxyuser . ':' . (isset($CFG->proxypassword) ? $CFG->proxypassword : '');
-        }
-        return $options;
     }
 }
