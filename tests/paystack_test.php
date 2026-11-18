@@ -42,7 +42,7 @@ class paystack_test extends \advanced_testcase {
 
     public function test_verify_rejects_invalid_reference_without_request(): void {
         $paystack = new paystack('moodle-enrol', 'pk', 'sk');
-        $this->assertSame(['http' => 0, 'body' => null], $paystack->verify_transaction('../../transfer'));
+        $this->assertSame(['http' => 0, 'body' => null, 'data' => null], $paystack->verify_transaction('../../transfer'));
     }
 
     public function test_curl_options_hardening_without_proxy(): void {

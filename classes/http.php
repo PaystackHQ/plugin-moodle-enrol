@@ -44,8 +44,6 @@ final class http {
      * @return array Options for curl_setopt_array().
      */
     public static function curl_options($url, $timeout = 15, $connecttimeout = 5) {
-        global $CFG;
-
         $options = [
             CURLOPT_TIMEOUT => $timeout,
             CURLOPT_CONNECTTIMEOUT => $connecttimeout,
@@ -59,6 +57,19 @@ final class http {
             $options[CURLOPT_PROTOCOLS] = CURLPROTO_HTTPS;
         }
 
+        return $options + self::proxy_options($url);
+    }
+
+    /**
+     * The site proxy settings as curl options, empty when no proxy applies to the URL.
+     *
+     * @param string $url Destination URL.
+     * @return array Options for curl_setopt_array().
+     */
+    public static function proxy_options($url) {
+        global $CFG;
+
+        $options = [];
         if (!empty($CFG->proxyhost) && !is_proxybypass($url)) {
             $options[CURLOPT_PROXY] = empty($CFG->proxyport) ? $CFG->proxyhost : $CFG->proxyhost . ':' . $CFG->proxyport;
             if (!empty($CFG->proxyuser) && !empty($CFG->proxypassword)) {

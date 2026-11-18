@@ -232,16 +232,10 @@ final class restricted_key
 
             $verdict = self::decide($results);
             if ($verdict['code'] === 'ok') {
-                $publickey = null;
-                foreach ($results as $r) {
-                    if ($r['probe']['scope'] === self::IDENT_SCOPE) {
-                        $body = $r['body'];
-                        if (is_array($body) && isset($body['data']) && is_array($body['data'])
-                                && isset($body['data']['public_key'])) {
-                            $publickey = $body['data']['public_key'];
-                        }
-                    }
-                }
+                // A verdict of ok means every probe ran, so the ident result is the one in PROBES order.
+                $ident = $results[1];
+                $publickey = $ident['probe']['scope'] === self::IDENT_SCOPE && is_array($ident['body'])
+                    ? ($ident['body']['data']['public_key'] ?? null) : null;
                 if (self::is_pk($publickey) && self::key_mode($publickey) === self::key_mode($key)) {
                     $verdict['public_key'] = $publickey;
                 } else {

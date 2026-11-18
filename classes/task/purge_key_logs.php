@@ -31,10 +31,6 @@ class purge_key_logs extends \core\task\adhoc_task {
     /** @var int Rows of the log table examined per delete. */
     const BATCH = 10000;
 
-    /** Setting names whose values must not stay in logs or presets. */
-    const NAMES = ['test_secretkey', 'live_secretkey', 'test_restrictedkey', 'live_restrictedkey',
-        'test_webhooksecret', 'live_webhooksecret'];
-
     public function execute() {
         $this->purge_log_store();
         $this->blank_presets();
@@ -49,7 +45,7 @@ class purge_key_logs extends \core\task\adhoc_task {
 
         $names = [];
         $params = ['eventname' => '\\core\\event\\config_log_created'];
-        foreach (self::NAMES as $i => $name) {
+        foreach (\enrol_paystack\util::secret_setting_names() as $i => $name) {
             $names[] = $DB->sql_like('other', ':name' . $i, true, true);
             $params['name' . $i] = '%' . $DB->sql_like_escape('"name":"' . $name . '"') . '%';
         }
@@ -74,7 +70,7 @@ class purge_key_logs extends \core\task\adhoc_task {
         if (!$DB->get_manager()->table_exists('adminpresets_it')) {
             return;
         }
-        list($insql, $params) = $DB->get_in_or_equal(self::NAMES, SQL_PARAMS_NAMED);
+        list($insql, $params) = $DB->get_in_or_equal(\enrol_paystack\util::secret_setting_names(), SQL_PARAMS_NAMED);
         $params['plugin'] = 'enrol_paystack';
         $DB->execute("UPDATE {adminpresets_it} SET value = '' WHERE plugin = :plugin AND name $insql", $params);
     }

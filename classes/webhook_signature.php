@@ -52,8 +52,11 @@ final class webhook_signature
             }
             if ($pair[0] === 't') {
                 $timestamp = $pair[1];
-            } else if ($pair[0] === 'v1' && strpos($pair[1], ':') !== false) {
-                $signatures[] = substr($pair[1], strpos($pair[1], ':') + 1);
+            } else if ($pair[0] === 'v1') {
+                $value = explode(':', $pair[1], 2);
+                if (count($value) === 2) {
+                    $signatures[] = $value[1];
+                }
             }
         }
         if ($timestamp === null || !ctype_digit($timestamp) || abs($now - (int) $timestamp) > self::TOLERANCE) {

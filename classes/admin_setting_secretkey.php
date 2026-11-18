@@ -28,19 +28,11 @@ defined('MOODLE_INTERNAL') || die();
 
 class admin_setting_secretkey extends admin_setting_secret
 {
-    /** @var string 'test' or 'live'. */
-    private $mode;
-
-    public function __construct($name, $visiblename, $description, $mode) {
-        $this->mode = $mode;
-        parent::__construct($name, $visiblename, $description, '');
-    }
-
     public function validate($data) {
         if (!preg_match('/^[\x21-\x7e]+\z/', $data)) {
             return get_string('sk_invalid', 'enrol_paystack');
         }
-        if (restricted_key::is_rk($data) || strpos($data, 'rk_') === 0) {
+        if (strpos($data, 'rk_') === 0) {
             return get_string('sk_put_rk_above', 'enrol_paystack');
         }
         if (restricted_key::key_type($data) !== 'sk') {

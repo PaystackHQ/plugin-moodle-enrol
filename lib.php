@@ -79,10 +79,21 @@ class enrol_paystack_plugin extends enrol_plugin
     public function get_secretkey()
     {
         $prefix = $this->mode_prefix();
-        if ($this->has_restricted_key($prefix)) {
-            return $this->is_rk_checked($prefix) ? $this->get_restrictedkey($prefix) : '';
+        $restrictedkey = $this->get_restrictedkey($prefix);
+        if ($restrictedkey !== '') {
+            return $this->is_rk_checked($prefix) ? $restrictedkey : '';
         }
         return trim((string) $this->get_config($prefix . '_secretkey'));
+    }
+
+    /**
+     * Whether both keys needed to take payments resolve for the active mode.
+     *
+     * @return bool
+     */
+    public function has_usable_key()
+    {
+        return $this->get_secretkey() !== '' && $this->get_publickey() !== '';
     }
 
     private function mode_prefix()
@@ -90,9 +101,10 @@ class enrol_paystack_plugin extends enrol_plugin
         return $this->get_mode() ? 'live' : 'test';
     }
 
-    private function get_restrictedkey($prefix)
+    // Read straight from config: the admin settings write it during the same request, past this instance's cache.
+    private function get_restrictedkey($mode)
     {
-        return trim((string) $this->get_config($prefix . '_restrictedkey'));
+        return trim((string) get_config('enrol_paystack', $mode . '_restrictedkey'));
     }
 
     /**
@@ -102,9 +114,7 @@ class enrol_paystack_plugin extends enrol_plugin
      */
     public function get_webhooksecret()
     {
-        return trim((string) ($this->get_mode() ?
-            $this->get_config('live_webhooksecret') :
-            $this->get_config('test_webhooksecret')));
+        return trim((string) $this->get_config($this->mode_prefix() . '_webhooksecret'));
     }
 
     /**
@@ -126,7 +136,7 @@ class enrol_paystack_plugin extends enrol_plugin
      */
     public function has_restricted_key($mode)
     {
-        return trim((string) get_config('enrol_paystack', $mode . '_restrictedkey')) !== '';
+        return $this->get_restrictedkey($mode) !== '';
     }
 
     /**
@@ -137,7 +147,7 @@ class enrol_paystack_plugin extends enrol_plugin
      */
     public function is_rk_checked($mode)
     {
-        $key = trim((string) get_config('enrol_paystack', $mode . '_restrictedkey'));
+        $key = $this->get_restrictedkey($mode);
         return $key !== '' && get_config('enrol_paystack', $mode . '_rkchecked') === self::rk_fingerprint($key);
     }
 
@@ -172,7 +182,7 @@ class enrol_paystack_plugin extends enrol_plugin
      *
      * @param string $mode 'test' or 'live'
      */
-    public function clear_secret_key($mode)
+    private function clear_secret_key($mode)
     {
         $name = $mode . '_secretkey';
         $old = (string) get_config('enrol_paystack', $name);
@@ -445,7 +455,7 @@ class enrol_paystack_plugin extends enrol_plugin
             return ob_get_clean();
         }
 
-        if ($this->get_secretkey() === '' || $this->get_publickey() === '') {
+        if (!$this->has_usable_key()) {
             echo '<p>' . get_string('notconfigured', 'enrol_paystack') . '</p>';
             return $OUTPUT->box(ob_get_clean());
         }
@@ -629,11 +639,4 @@ class enrol_paystack_plugin extends enrol_plugin
         }
         return $token;
     }
-}
-
-/**
- * Updated callback of the key settings: keeps them marked sensitive for admin presets.
- */
-function enrol_paystack_register_sensible_settings() {
-    \enrol_paystack\util::register_sensible_settings();
 }

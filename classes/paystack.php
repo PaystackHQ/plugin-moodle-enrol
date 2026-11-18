@@ -52,12 +52,13 @@ class paystack
      * Verify Payment Transaction
      *
      * @param string $reference
-     * @return array ['http' => int status (0 when no response), 'body' => decoded array|null]
+     * @return array ['http' => int status (0 when no response), 'body' => decoded array|null,
+     *     'data' => the body's data array of a 2xx response reporting success, else null]
      */
     public function verify_transaction($reference)
     {
         if (!self::is_valid_reference($reference)) {
-            return ['http' => 0, 'body' => null];
+            return ['http' => 0, 'body' => null, 'data' => null];
         }
 
         $paystackUrl = $this->base_url . "transaction/verify/" . rawurlencode($reference);
@@ -80,7 +81,10 @@ class paystack
 
         $body = is_string($request) ? json_decode($request, true) : null;
 
-        return ['http' => $http, 'body' => is_array($body) ? $body : null];
+        $body = is_array($body) ? $body : null;
+        $ok = $http >= 200 && $http <= 299 && !empty($body['status']) && isset($body['data']) && is_array($body['data']);
+
+        return ['http' => $http, 'body' => $body, 'data' => $ok ? $body['data'] : null];
     }
 
     /**

@@ -79,7 +79,7 @@ class enrolment {
      * @param \stdClass $instance Enrol instance.
      * @param float $cost Resolved course cost in major units.
      * @param string $expecteddomain 'live' or 'test', matching the configured mode.
-     * @param int|null $replayguardsince Transactions paid before this timestamp are refused; null disables the check.
+     * @param int|null $replayguardsince Transactions paid before this timestamp are refused; 0 or null disables the check.
      * @return string|null Null when acceptable, otherwise a short reason.
      */
     public static function check_payment(array $txdata, \stdClass $instance, $cost, $expecteddomain, $replayguardsince = null) {
@@ -178,9 +178,8 @@ class enrolment {
         ];
 
         $cost = self::resolve_cost($instance, $plugin->get_config('cost'));
-        $guard = get_config('enrol_paystack', 'replayguard_since');
         $problem = self::check_payment($txdata, $instance, $cost, $plugin->get_mode() ? 'live' : 'test',
-            $guard === false || $guard === '' ? null : (int) $guard);
+            (int) get_config('enrol_paystack', 'replayguard_since'));
         if ($problem !== null) {
             if ($source === 'webhook') {
                 util::message_paystack_error_to_admin($problem, $adminrecord);
@@ -278,18 +277,7 @@ class enrolment {
         $coursename = format_string($course->fullname, true, ['context' => $context]);
         $subject = get_string('enrolmentnew', 'enrol', format_string($course->shortname, true, ['context' => $context]));
         $send = function($from, $to, $text) use ($subject) {
-            $eventdata = new \core\message\message();
-            $eventdata->modulename        = 'moodle';
-            $eventdata->component         = 'enrol_paystack';
-            $eventdata->name              = 'paystack_enrolment';
-            $eventdata->userfrom          = $from;
-            $eventdata->userto            = $to;
-            $eventdata->subject           = $subject;
-            $eventdata->fullmessage       = $text;
-            $eventdata->fullmessageformat = FORMAT_PLAIN;
-            $eventdata->fullmessagehtml   = '';
-            $eventdata->smallmessage      = '';
-            message_send($eventdata);
+            util::send_message($from, $to, $subject, $text);
         };
 
         if ($plugin->get_config('mailstudents')) {

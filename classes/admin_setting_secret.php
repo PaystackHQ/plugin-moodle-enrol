@@ -33,6 +33,14 @@ abstract class admin_setting_secret extends \admin_setting_configpasswordunmask
 {
     const LAST4_MIN_LENGTH = 20;
 
+    /** @var string|null 'test' or 'live' for settings tied to a mode. */
+    protected $mode;
+
+    public function __construct($name, $visiblename, $description, $mode = null) {
+        $this->mode = $mode;
+        parent::__construct($name, $visiblename, $description, '');
+    }
+
     /** Admin search must never match the stored secret. */
     public function is_related($query) {
         return strpos(strtolower($this->name), $query) !== false
@@ -66,16 +74,43 @@ abstract class admin_setting_secret extends \admin_setting_configpasswordunmask
         }
         $data = trim($data);
         $stored = (string) $this->get_setting();
-        if ($data === '' && $stored !== '') {
+        if ($data === '') {
+            if ($stored !== '') {
+                return '';
+            }
+            return $this->config_write($this->name, '') ? '' : get_string('errorsetting', 'admin');
+        }
+        if ($data === $stored && $this->is_current($data)) {
             return '';
         }
-        if ($data !== '') {
-            $validated = $this->validate($data);
-            if ($validated !== true) {
-                return $validated;
-            }
+        $validated = $this->validate($data);
+        if ($validated !== true) {
+            return $validated;
         }
-        return $this->config_write($this->name, $data) ? '' : get_string('errorsetting', 'admin');
+        if (!$this->config_write($this->name, $data)) {
+            return get_string('errorsetting', 'admin');
+        }
+        $this->after_write($data);
+        return '';
+    }
+
+    /**
+     * Whether re-entering the stored value can skip validation. Off by default so a retyped value is
+     * still checked against rules that depend on other settings (e.g. a restricted key now being stored).
+     *
+     * @param string $data
+     * @return bool
+     */
+    protected function is_current($data) {
+        return false;
+    }
+
+    /**
+     * Runs once the value has been written.
+     *
+     * @param string $data
+     */
+    protected function after_write($data) {
     }
 
     /**

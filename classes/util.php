@@ -49,18 +49,42 @@ final class util {
         foreach ($data as $key => $value) {
             $message .= s($key) . " => " . s($value) . "\n";
         }
+        self::send_message($admin, $admin, "PAYSTACK PAYMENT ERROR: " . $subject, $message);
+    }
+
+    /**
+     * Send a plain text message through the plugin's message provider.
+     *
+     * @param \stdClass $from
+     * @param \stdClass $to
+     * @param string $subject
+     * @param string $text
+     */
+    public static function send_message($from, $to, $subject, $text)
+    {
         $eventdata = new \core\message\message();
         $eventdata->modulename        = 'moodle';
         $eventdata->component         = 'enrol_paystack';
         $eventdata->name              = 'paystack_enrolment';
-        $eventdata->userfrom          = $admin;
-        $eventdata->userto            = $admin;
-        $eventdata->subject           = "PAYSTACK PAYMENT ERROR: " . $subject;
-        $eventdata->fullmessage       = $message;
+        $eventdata->userfrom          = $from;
+        $eventdata->userto            = $to;
+        $eventdata->subject           = $subject;
+        $eventdata->fullmessage       = $text;
         $eventdata->fullmessageformat = FORMAT_PLAIN;
         $eventdata->fullmessagehtml   = '';
         $eventdata->smallmessage      = '';
         message_send($eventdata);
+    }
+
+    /**
+     * Names of the settings holding secrets, each prefixed by a mode.
+     *
+     * @return string[]
+     */
+    public static function secret_setting_names()
+    {
+        return ['test_secretkey', 'live_secretkey', 'test_restrictedkey', 'live_restrictedkey',
+            'test_webhooksecret', 'live_webhooksecret'];
     }
 
     /**
@@ -99,12 +123,10 @@ final class util {
         }
         $have = array_map('trim', explode(',', $current));
         $missing = [];
-        foreach (['secretkey', 'restrictedkey', 'webhooksecret'] as $name) {
-            foreach (['test', 'live'] as $mode) {
-                $entry = "{$mode}_{$name}@@enrol_paystack";
-                if (!in_array($entry, $have, true)) {
-                    $missing[] = $entry;
-                }
+        foreach (self::secret_setting_names() as $name) {
+            $entry = "{$name}@@enrol_paystack";
+            if (!in_array($entry, $have, true)) {
+                $missing[] = $entry;
             }
         }
         if ($missing) {

@@ -57,14 +57,12 @@ $plugin = enrol_get_plugin('paystack');
 $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
 
 $res = $paystack->verify_transaction($reference);
-$body = $res['body'];
-if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset($body['data']) || !is_array($body['data'])) {
+if ($res['data'] === null) {
     \enrol_paystack\util::notify_key_failure($res['http'], (object) ['reference' => $reference]);
     notice($sorry, $home);
 }
-$txdata = $body['data'];
 
-$outcome = \enrol_paystack\enrolment::process($txdata, $reference, 'return', $USER->id, $paystack);
+$outcome = \enrol_paystack\enrolment::process($res['data'], $reference, 'return', $USER->id, $paystack);
 $result = $outcome['status'];
 $courseurl = $outcome['courseid'] === null ? $home : new moodle_url('/course/view.php', ['id' => $outcome['courseid']]);
 
@@ -74,7 +72,4 @@ if ($result === 'enrolled' || $result === 'already_enrolled') {
     redirect($courseurl, get_string('paymentthanks', '', $fullname));
 }
 
-if ($result === 'not_ours' || $result === 'wrong_user') {
-    $courseurl = $home;
-}
 notice($sorry, $courseurl);

@@ -28,28 +28,10 @@ defined('MOODLE_INTERNAL') || die();
 
 class admin_setting_restrictedkey extends admin_setting_secret
 {
-    /** @var string 'test' or 'live'. */
-    private $mode;
+    /** @var string|null Public key Paystack reported for the key last accepted by validate(). */
+    private $publickey;
 
-    public function __construct($name, $visiblename, $description, $mode) {
-        $this->mode = $mode;
-        parent::__construct($name, $visiblename, $description, '');
-    }
-
-    public function write_setting($data) {
-        $removal = $this->handle_removal();
-        if ($removal !== null) {
-            return $removal;
-        }
-        $data = trim($data);
-        $stored = (string) $this->get_setting();
-        if ($data === '') {
-            if ($stored !== '') {
-                return '';
-            }
-            return $this->config_write($this->name, '') ? '' : get_string('errorsetting', 'admin');
-        }
-
+    public function validate($data) {
         if (!restricted_key::is_rk($data)) {
             if (preg_match('/^(sk|pk)_/', $data)) {
                 return $this->refuse(get_string('rk_put_secret_below', 'enrol_paystack'));
@@ -65,25 +47,24 @@ class admin_setting_restrictedkey extends admin_setting_secret
             )));
         }
 
-        $plugin = enrol_get_plugin('paystack');
-        if ($data === $stored && $plugin->is_rk_checked($this->mode)) {
-            return '';
-        }
-
         $verdict = $this->run_validator($data, array(
-            'curl_options' => http::curl_options(restricted_key::BASE_URL, 5, 3),
+            'curl_options' => http::proxy_options(restricted_key::BASE_URL),
         ));
         $code = isset($verdict['code']) ? $verdict['code'] : 'unverifiable';
 
         if ($code !== 'ok') {
             return $this->refuse($this->verdict_message($verdict));
         }
+        $this->publickey = $verdict['public_key'];
+        return true;
+    }
 
-        if (!$this->config_write($this->name, $data)) {
-            return get_string('errorsetting', 'admin');
-        }
-        $plugin->set_restricted_key($this->mode, $data, $verdict['public_key']);
-        return '';
+    protected function is_current($data) {
+        return enrol_get_plugin('paystack')->is_rk_checked($this->mode);
+    }
+
+    protected function after_write($data) {
+        enrol_get_plugin('paystack')->set_restricted_key($this->mode, $data, $this->publickey);
     }
 
     protected function run_validator($key, array $options) {

@@ -76,16 +76,11 @@ if (!\enrol_paystack\paystack::is_valid_reference($reference)) {
 $paystack = new \enrol_paystack\paystack('moodle-enrol', $plugin->get_publickey(), $plugin->get_secretkey());
 
 $res = $paystack->verify_transaction($reference);
-$body = $res['body'];
 
-if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset($body['data']) || !is_array($body['data'])) {
-    if ($res['http'] === 401 || $res['http'] === 403) {
-        \enrol_paystack\util::notify_key_failure($res['http'], (object) ['reference' => $reference]);
-        http_response_code(500);
-        exit;
-    }
-    if ($res['http'] === 0 || $res['http'] === 429 || $res['http'] >= 500) {
-        // Transient: let Paystack retry.
+if ($res['data'] === null) {
+    \enrol_paystack\util::notify_key_failure($res['http'], (object) ['reference' => $reference]);
+    // Key rejections and transient failures: let Paystack retry.
+    if (in_array($res['http'], [0, 401, 403, 429], true) || $res['http'] >= 500) {
         http_response_code(500);
         exit;
     }
@@ -94,5 +89,5 @@ if ($res['http'] < 200 || $res['http'] > 299 || empty($body['status']) || !isset
     exit;
 }
 
-$outcome = \enrol_paystack\enrolment::process($body['data'], $reference, 'webhook', null, $paystack);
+$outcome = \enrol_paystack\enrolment::process($res['data'], $reference, 'webhook', null, $paystack);
 http_response_code($outcome['status'] === 'busy' ? 500 : 200);

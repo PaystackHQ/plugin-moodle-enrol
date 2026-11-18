@@ -44,20 +44,20 @@ if ($ADMIN->fulltree) {
     ));
 
     $paystackplugin = enrol_get_plugin('paystack');
-    $paystackconfig = get_config('enrol_paystack');
     $warnings = [];
     $activemode = $paystackplugin->get_mode() ? 'live' : 'test';
-    if ($paystackplugin->get_secretkey() !== '' && $paystackplugin->get_webhooksecret() === '') {
+    $hassecret = $paystackplugin->get_secretkey() !== '';
+    if ($hassecret && $paystackplugin->get_webhooksecret() === '') {
         $warnings[] = get_string('warning_nowebhooksecret', 'enrol_paystack', $activemode);
     }
-    if ($paystackplugin->get_secretkey() === '' || $paystackplugin->get_publickey() === '') {
+    if (!$paystackplugin->has_usable_key()) {
         $warnings[] = get_string('warning_nokey', 'enrol_paystack', $activemode);
     }
     foreach (['test', 'live'] as $keymode) {
         if ($paystackplugin->has_restricted_key($keymode) && !$paystackplugin->is_rk_checked($keymode)) {
             $warnings[] = get_string('warning_rkunchecked', 'enrol_paystack', $keymode);
         }
-        if (strpos((string) ($paystackconfig->{"{$keymode}_secretkey"} ?? ''), 'rk_') === 0) {
+        if (strpos((string) get_config('enrol_paystack', "{$keymode}_secretkey"), 'rk_') === 0) {
             $warnings[] = get_string('warning_rkinsecretfield', 'enrol_paystack', $keymode);
         }
     }
@@ -94,7 +94,7 @@ if ($ADMIN->fulltree) {
             get_string("{$keymode}_restrictedkey_desc", 'enrol_paystack'),
             $keymode
         );
-        $setting->set_updatedcallback('enrol_paystack_register_sensible_settings');
+        $setting->set_updatedcallback('enrol_paystack\\util::register_sensible_settings');
         $settings->add($setting);
     }
 
@@ -108,10 +108,9 @@ if ($ADMIN->fulltree) {
         $setting = new \enrol_paystack\admin_setting_webhooksecret(
             "enrol_paystack/{$keymode}_webhooksecret",
             get_string("{$keymode}_webhooksecret", 'enrol_paystack'),
-            get_string('webhooksecret_desc', 'enrol_paystack'),
-            ''
+            get_string('webhooksecret_desc', 'enrol_paystack')
         );
-        $setting->set_updatedcallback('enrol_paystack_register_sensible_settings');
+        $setting->set_updatedcallback('enrol_paystack\\util::register_sensible_settings');
         $settings->add($setting);
     }
 
@@ -128,7 +127,7 @@ if ($ADMIN->fulltree) {
             get_string("{$keymode}_secretkey_desc", 'enrol_paystack'),
             $keymode
         );
-        $setting->set_updatedcallback('enrol_paystack_register_sensible_settings');
+        $setting->set_updatedcallback('enrol_paystack\\util::register_sensible_settings');
         $settings->add($setting);
 
         $settings->add(new admin_setting_configtext(
@@ -208,7 +207,7 @@ if ($ADMIN->fulltree) {
         $options
     ));
 
-    $currencies = enrol_get_plugin('paystack')->get_currencies();
+    $currencies = $paystackplugin->get_currencies();
     $settings->add(new admin_setting_configselect(
         'enrol_paystack/currency',
         get_string('currency', 'enrol_paystack'),
