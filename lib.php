@@ -63,21 +63,33 @@ class enrol_paystack_plugin extends enrol_plugin
      */
     public function get_publickey()
     {
-        return $this->get_mode() ? 
-            $this->get_config('live_publickey') :
-            $this->get_config('test_publickey') ;
+        $prefix = $this->mode_prefix();
+        if ($this->get_restrictedkey($prefix) !== '') {
+            return $this->get_config($prefix . '_rkpublickey');
+        }
+        return $this->get_config($prefix . '_publickey');
     }
 
     /**
-     * Return secret key of this enrol plugin.
+     * Return secret key of this enrol plugin: the restricted key when one is saved.
      *
      * @return string
      */
     public function get_secretkey()
     {
-        return $this->get_mode() ? 
-            $this->get_config('live_secretkey') :
-            $this->get_config('test_secretkey') ;
+        $prefix = $this->mode_prefix();
+        $restricted = $this->get_restrictedkey($prefix);
+        return $restricted !== '' ? $restricted : $this->get_config($prefix . '_secretkey');
+    }
+
+    private function mode_prefix()
+    {
+        return $this->get_mode() ? 'live' : 'test';
+    }
+
+    private function get_restrictedkey($prefix)
+    {
+        return trim((string) $this->get_config($prefix . '_restrictedkey'));
     }
 
     /**

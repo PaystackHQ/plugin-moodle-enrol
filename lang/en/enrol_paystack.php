@@ -104,3 +104,47 @@ $string['webhooksecret_desc'] = 'Starts with whsec_. Create it in the Paystack D
 $string['webhooksecret_invalid'] = 'The webhook signing secret must start with whsec_ and be at least 22 characters with no spaces.';
 $string['secret_saved'] = 'Saved. Leave blank to keep it.';
 $string['secret_saved_last4'] = 'Saved: …{$a}. Leave blank to keep it.';
+$string['live_restrictedkey'] = 'Live restricted key';
+$string['live_restrictedkey_desc'] = 'A live restricted key, starting with rk_live_.';
+$string['test_restrictedkey'] = 'Test restricted key';
+$string['test_restrictedkey_desc'] = 'A test restricted key, starting with rk_test_.';
+$string['restrictedkeys'] = 'Restricted keys';
+$string['restrictedkeys_desc'] = '<ol>
+<li>Create a restricted key in your <a href="https://dashboard.paystack.com/#/settings/developer" target="_blank" rel="noopener">Paystack Dashboard</a>.</li>
+<li>Turn on only Account: read and Transactions: read. Leave every other permission off.</li>
+<li>Paste a test key in Test and a live key in Live.</li>
+<li>You do not need a public key.</li>
+</ol>';
+$string['webhooksecrets'] = 'Webhook signing secrets';
+$string['webhooksecrets_desc'] = 'Used to verify that webhooks really come from Paystack.';
+$string['secretkeys'] = 'Use secret keys instead';
+$string['secretkeys_desc'] = 'Only if you can\'t use a restricted key. A restricted key, when saved, replaces the secret key for that mode.';
+$string['rk_mode_live'] = 'live';
+$string['rk_mode_test'] = 'test';
+$string['rk_not_saved'] = 'Other settings on this page were saved; the previous key is still in use.';
+$string['rk_put_secret_below'] = 'This field takes a restricted key (rk_…). Put a secret key under "Use secret keys instead".';
+$string['rk_invalid_shape'] = 'This is not a restricted key. It should start with rk_test_ or rk_live_ and be copied in full.';
+$string['rk_wrong_mode'] = 'This is a {$a->key} key; paste it in the {$a->field} field.';
+$string['rk_invalid_key'] = 'Paystack doesn\'t recognise this key. Check it was copied in full, hasn\'t been revoked, and that restricted keys are enabled for your Paystack account.';
+$string['rk_missing_scope'] = 'This key is missing permissions the plugin needs: {$a}. Turn them on in the Paystack Dashboard.';
+$string['rk_sensitive_scope'] = 'This key has permissions the plugin doesn\'t need: {$a}. Turn them off in the Paystack Dashboard, or create a key with only Account: read and Transactions: read.';
+$string['rk_blocked'] = 'Paystack refused the check from this server. If your integration uses an IP whitelist, add this server\'s outgoing IP address.';
+$string['rk_transient'] = 'Couldn\'t reach Paystack to check this key. Try saving again.';
+$string['rk_account'] = 'Couldn\'t confirm this key\'s public key with Paystack. Make sure the key has Account: read and is a {$a} key.';
+$string['sk_invalid'] = 'The secret key must not contain spaces or other invalid characters.';
+$string['sk_put_rk_above'] = 'This is a restricted key. Put it under "Restricted keys" above.';
+$string['sk_one_key_per_mode'] = 'You entered a restricted key and a secret key for {$a} mode. The restricted key was saved; leave the secret key blank.';
+$string['rk_scope_account:read'] = 'Account: read';
+$string['rk_scope_transactions:read'] = 'Transactions: read';
+$string['rk_scope_transactions:write'] = 'Transactions: write';
+$string['rk_scope_disputes_refunds'] = 'Disputes and refunds';
+$string['rk_scope_bulk_charges'] = 'Bulk charges';
+$string['rk_scope_direct_debit'] = 'Direct debit';
+$string['rk_scope_preauthorizations'] = 'Preauthorizations';
+$string['rk_scope_settlements'] = 'Settlements';
+$string['rk_scope_subaccounts'] = 'Subaccounts';
+$string['rk_scope_transfers'] = 'Transfers';
+$string['rk_scope_virtual_accounts'] = 'Virtual accounts';
+$string['rk_scope_webhooks'] = 'Webhooks';
+$string['rk_scope_connect'] = 'Connect';
+$string['rk_scope_payouts'] = 'Payouts';

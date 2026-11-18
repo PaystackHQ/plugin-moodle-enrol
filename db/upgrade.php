@@ -44,5 +44,18 @@ function xmldb_enrol_paystack_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026111800, 'enrol', 'paystack');
     }
 
+    if ($oldversion < 2026111802) {
+        // Earlier versions logged these values in clear text.
+        $names = ['test_secretkey', 'live_secretkey', 'test_restrictedkey', 'live_restrictedkey',
+            'test_webhooksecret', 'live_webhooksecret'];
+        foreach (['value', 'oldvalue'] as $column) {
+            list($insql, $params) = $DB->get_in_or_equal($names);
+            array_unshift($params, 'enrol_paystack');
+            $DB->execute("UPDATE {config_log} SET $column = '********'
+                           WHERE plugin = ? AND name $insql AND $column IS NOT NULL AND $column <> ''", $params);
+        }
+        upgrade_plugin_savepoint(true, 2026111802, 'enrol', 'paystack');
+    }
+
     return true;
 }

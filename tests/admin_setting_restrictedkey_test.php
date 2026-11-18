@@ -1,0 +1,277 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+namespace enrol_paystack;
+
+defined('MOODLE_INTERNAL') || die();
+
+global $CFG;
+require_once($CFG->dirroot . '/enrol/paystack/lib.php');
+
+/**
+ * Tests for the restricted key and secret key admin settings.
+ *
+ * @package    enrol_paystack
+ * @copyright  2019 Paystack
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @covers     \enrol_paystack\admin_setting_restrictedkey
+ * @covers     \enrol_paystack\admin_setting_secretkey
+ */
+final class admin_setting_restrictedkey_test extends \advanced_testcase {
+    private const TESTRK = 'rk_test_' . 'abcdefghijklmnopqrstuvwxyz0123';
+    private const LIVERK = 'rk_live_' . 'abcdefghijklmnopqrstuvwxyz0123';
+    private const TESTSK = 'sk_test_' . 'abcdefghijklmnopqrstuvwxyz0123';
+
+    /** @var array Calls received by the validator stub. */
+    private $calls;
+
+    /** @var array Verdict the validator stub returns. */
+    private $verdict;
+
+    protected function setUp(): void {
+        parent::setUp();
+        $this->resetAfterTest();
+        $this->calls = array();
+        $this->verdict = $this->verdict('ok');
+        $test = $this;
+        admin_setting_restrictedkey::$saved_this_request = array();
+        admin_setting_restrictedkey::$validator = function ($key, array $options) use ($test) {
+            $test->calls[] = $key;
+            return $test->verdict;
+        };
+    }
+
+    protected function tearDown(): void {
+        admin_setting_restrictedkey::$validator = null;
+        admin_setting_restrictedkey::$saved_this_request = array();
+        parent::tearDown();
+    }
+
+    private function verdict($code, array $extra = array()) {
+        return $extra + array(
+            'code' => $code,
+            'scopes' => array(),
+            'sensitive_scopes' => array(),
+            'reason' => null,
+            'public_key' => $code === 'ok' ? 'pk_test_publicpublic' : null,
+            'probes' => '',
+        );
+    }
+
+    private function rk($mode = 'test') {
+        return new admin_setting_restrictedkey("enrol_paystack/{$mode}_restrictedkey", 'rk', 'desc', $mode);
+    }
+
+    private function sk($mode = 'test') {
+        return new admin_setting_secretkey("enrol_paystack/{$mode}_secretkey", 'sk', 'desc', $mode);
+    }
+
+    private function cfg($name) {
+        return get_config('enrol_paystack', $name);
+    }
+
+    public function test_good_key_is_stored(): void {
+        set_config('test_secretkey', self::TESTSK, 'enrol_paystack');
+        $this->assertSame('', $this->rk()->write_setting(self::TESTRK));
+        $this->assertSame(self::TESTRK, $this->cfg('test_restrictedkey'));
+        $this->assertSame('pk_test_publicpublic', $this->cfg('test_rkpublickey'));
+        $this->assertSame(hash('sha256', self::TESTRK), $this->cfg('test_rkchecked'));
+        $this->assertSame('', $this->cfg('test_secretkey'));
+        $this->assertCount(1, $this->calls);
+    }
+
+    public function test_same_key_is_not_probed_again(): void {
+        $this->assertSame('', $this->rk()->write_setting(self::TESTRK));
+        $this->assertSame('', $this->rk()->write_setting(self::TESTRK));
+        $this->assertCount(1, $this->calls);
+    }
+
+    public function test_stored_key_without_matching_check_is_probed(): void {
+        set_config('test_restrictedkey', self::TESTRK, 'enrol_paystack');
+        $this->assertSame('', $this->rk()->write_setting(self::TESTRK));
+        $this->assertCount(1, $this->calls);
+
+        set_config('test_rkchecked', 'stale', 'enrol_paystack');
+        $this->assertSame('', $this->rk()->write_setting(self::TESTRK));
+        $this->assertCount(2, $this->calls);
+    }
+
+    public function test_wrong_mode_is_refused(): void {
+        $message = $this->rk('test')->write_setting(self::LIVERK);
+        $this->assertStringContainsString('live', $message);
+        $this->assertStringNotContainsString(self::LIVERK, $message);
+        $this->assertEmpty($this->cfg('test_restrictedkey'));
+        $this->assertCount(0, $this->calls);
+    }
+
+    public function test_secret_key_in_restricted_field_is_refused(): void {
+        $message = $this->rk()->write_setting(self::TESTSK);
+        $this->assertSame(get_string('rk_put_secret_below', 'enrol_paystack') . ' ' .
+            get_string('rk_not_saved', 'enrol_paystack'), $message);
+        $this->assertEmpty($this->cfg('test_restrictedkey'));
+        $this->assertCount(0, $this->calls);
+    }
+
+    public function test_bad_shape_is_refused(): void {
+        $message = $this->rk()->write_setting('not a key');
+        $this->assertStringContainsString(get_string('rk_invalid_shape', 'enrol_paystack'), $message);
+        $this->assertEmpty($this->cfg('test_restrictedkey'));
+        $this->assertCount(0, $this->calls);
+    }
+
+    /**
+     * @dataProvider refused_verdicts
+     */
+    public function test_refused_verdicts_store_nothing(array $verdict, $expected): void {
+        set_config('test_restrictedkey', 'rk_test_' . 'previouspreviouspreviousprev', 'enrol_paystack');
+        set_config('test_rkpublickey', 'pk_test_previous', 'enrol_paystack');
+        $this->verdict = $verdict;
+        $message = $this->rk()->write_setting(self::TESTRK);
+        $this->assertNotSame('', $message);
+        $this->assertStringNotContainsString(self::TESTRK, $message);
+        $this->assertStringContainsString($expected, $message);
+        $this->assertStringContainsString(get_string('rk_not_saved', 'enrol_paystack'), $message);
+        $this->assertSame('rk_test_' . 'previouspreviouspreviousprev', $this->cfg('test_restrictedkey'));
+        $this->assertSame('pk_test_previous', $this->cfg('test_rkpublickey'));
+        $this->assertEmpty(admin_setting_restrictedkey::$saved_this_request);
+    }
+
+    public static function refused_verdicts(): array {
+        $base = array('scopes' => array(), 'sensitive_scopes' => array(), 'reason' => null,
+            'public_key' => null, 'probes' => '');
+        return array(
+            'invalid_key' => array(array('code' => 'invalid_key') + $base, 'recognise'),
+            'missing_scope' => array(array('code' => 'missing_scope', 'scopes' => array('transactions:read'),
+                'sensitive_scopes' => array('transfers')) + $base, 'Transactions: read'),
+            'sensitive_scope' => array(array('code' => 'sensitive_scope', 'sensitive_scopes' => array('transactions:write',
+                'disputes_refunds')) + $base, 'Transactions: write, Disputes and refunds'),
+            'blocked' => array(array('code' => 'unverifiable', 'reason' => 'blocked') + $base, 'IP whitelist'),
+            'transient' => array(array('code' => 'unverifiable', 'reason' => 'transient') + $base, 'Try saving again'),
+            'account' => array(array('code' => 'account') + $base, 'test key'),
+        );
+    }
+
+    public function test_missing_scope_also_names_sensitive_scopes(): void {
+        $this->verdict = $this->verdict('missing_scope', array('scopes' => array('account:read'),
+            'sensitive_scopes' => array('transfers')));
+        $message = $this->rk()->write_setting(self::TESTRK);
+        $this->assertStringContainsString('Account: read', $message);
+        $this->assertStringContainsString('Transfers', $message);
+    }
+
+    public function test_blank_keeps_stored_key(): void {
+        $this->rk()->write_setting(self::TESTRK);
+        $this->assertSame('', $this->rk()->write_setting(''));
+        $this->assertSame('', $this->rk()->write_setting('   '));
+        $this->assertSame(self::TESTRK, $this->cfg('test_restrictedkey'));
+        $this->assertCount(1, $this->calls);
+    }
+
+    public function test_blank_with_nothing_stored_writes_blank(): void {
+        $this->assertSame('', $this->rk()->write_setting(''));
+        $this->assertCount(0, $this->calls);
+        $this->assertEmpty($this->cfg('test_restrictedkey'));
+    }
+
+    public function test_key_is_trimmed(): void {
+        $this->assertSame('', $this->rk()->write_setting("  " . self::TESTRK . "\n"));
+        $this->assertSame(self::TESTRK, $this->cfg('test_restrictedkey'));
+        $this->assertSame(array(self::TESTRK), $this->calls);
+    }
+
+    public function test_config_log_masks_the_key(): void {
+        global $DB;
+        $this->rk()->write_setting(self::TESTRK);
+        $rows = $DB->get_records('config_log', array('plugin' => 'enrol_paystack', 'name' => 'test_restrictedkey'), 'id DESC');
+        $row = reset($rows);
+        $this->assertSame('********', $row->value);
+    }
+
+    public function test_output_html_never_contains_the_key(): void {
+        $this->rk()->write_setting(self::TESTRK);
+        $setting = $this->rk();
+        $html = $setting->output_html(self::TESTRK);
+        $this->assertStringNotContainsString(self::TESTRK, $html);
+        $this->assertStringContainsString(substr(self::TESTRK, -4), $html);
+    }
+
+    public function test_secretkey_refuses_restricted_key(): void {
+        $message = $this->sk()->write_setting(self::TESTRK);
+        $this->assertSame(get_string('sk_put_rk_above', 'enrol_paystack'), $message);
+        $this->assertEmpty($this->cfg('test_secretkey'));
+    }
+
+    public function test_secretkey_refuses_invalid_characters(): void {
+        $this->assertSame(get_string('sk_invalid', 'enrol_paystack'), $this->sk()->write_setting('sk_test_a b'));
+        $this->assertEmpty($this->cfg('test_secretkey'));
+    }
+
+    public function test_secretkey_stored_and_clears_restricted_key(): void {
+        $this->rk()->write_setting(self::TESTRK);
+        // A later admin save is a new request.
+        admin_setting_restrictedkey::$saved_this_request = array();
+        $this->assertSame('', $this->sk()->write_setting(self::TESTSK));
+        $this->assertSame(self::TESTSK, $this->cfg('test_secretkey'));
+        $this->assertEmpty($this->cfg('test_restrictedkey'));
+        $this->assertEmpty($this->cfg('test_rkpublickey'));
+        $this->assertEmpty($this->cfg('test_rkchecked'));
+    }
+
+    public function test_secretkey_blank_keeps_restricted_key(): void {
+        $this->rk()->write_setting(self::TESTRK);
+        $this->assertSame('', $this->sk()->write_setting(''));
+        $this->assertSame(self::TESTRK, $this->cfg('test_restrictedkey'));
+    }
+
+    public function test_secretkey_in_same_request_as_restricted_key_is_refused(): void {
+        $this->rk()->write_setting(self::TESTRK);
+        $message = $this->sk()->write_setting(self::TESTSK);
+        $this->assertStringContainsString('test', $message);
+        $this->assertEmpty($this->cfg('test_secretkey'));
+        $this->assertSame(self::TESTRK, $this->cfg('test_restrictedkey'));
+        // The other mode is unaffected.
+        $this->assertSame('', $this->sk('live')->write_setting('sk_live_' . 'abcdefghijklmnopqrstuvwxyz0123'));
+    }
+
+    public function test_plugin_key_resolution(): void {
+        set_config('test_secretkey', 'sk_test_plain', 'enrol_paystack');
+        set_config('test_publickey', 'pk_test_plain', 'enrol_paystack');
+        set_config('live_secretkey', 'sk_live_plain', 'enrol_paystack');
+        set_config('live_publickey', 'pk_live_plain', 'enrol_paystack');
+
+        set_config('mode', 0, 'enrol_paystack');
+        $plugin = new \enrol_paystack_plugin();
+        $this->assertSame('sk_test_plain', $plugin->get_secretkey());
+        $this->assertSame('pk_test_plain', $plugin->get_publickey());
+
+        set_config('test_restrictedkey', self::TESTRK, 'enrol_paystack');
+        set_config('test_rkpublickey', 'pk_test_fromrk', 'enrol_paystack');
+        $plugin = new \enrol_paystack_plugin();
+        $this->assertSame(self::TESTRK, $plugin->get_secretkey());
+        $this->assertSame('pk_test_fromrk', $plugin->get_publickey());
+
+        set_config('mode', 1, 'enrol_paystack');
+        $plugin = new \enrol_paystack_plugin();
+        $this->assertSame('sk_live_plain', $plugin->get_secretkey());
+        $this->assertSame('pk_live_plain', $plugin->get_publickey());
+
+        set_config('live_restrictedkey', ' ' . self::LIVERK . ' ', 'enrol_paystack');
+        set_config('live_rkpublickey', 'pk_live_fromrk', 'enrol_paystack');
+        $plugin = new \enrol_paystack_plugin();
+        $this->assertSame(self::LIVERK, $plugin->get_secretkey());
+        $this->assertSame('pk_live_fromrk', $plugin->get_publickey());
+    }
+}
