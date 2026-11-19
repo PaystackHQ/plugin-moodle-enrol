@@ -26,12 +26,12 @@
 defined('MOODLE_INTERNAL') || die();
 
 /** Paystack live mode disabled. */
-define('LIVE_MODE_DISABLED', 0);
+defined('LIVE_MODE_DISABLED') || define('LIVE_MODE_DISABLED', 0);
 
 /** Paystack live mode enabled.*/
-define('LIVE_MODE_ENABLED', 1);
+defined('LIVE_MODE_ENABLED') || define('LIVE_MODE_ENABLED', 1);
 
-global $CFG;
+global $CFG, $OUTPUT;
 
 if ($ADMIN->fulltree) {
     $webhook = "$CFG->wwwroot/enrol/paystack/webhook.php";
@@ -42,6 +42,16 @@ if ($ADMIN->fulltree) {
         '',
         get_string('pluginname_desc', 'enrol_paystack') . " " . $text
     ));
+
+    $paystackplugin = enrol_get_plugin('paystack');
+    $warnings = $paystackplugin->get_key_warnings();
+    if ($warnings) {
+        $html = '';
+        foreach ($warnings as $warning) {
+            $html .= $OUTPUT->notification($warning, \core\output\notification::NOTIFY_WARNING);
+        }
+        $settings->add(new admin_setting_heading('enrol_paystack_warnings', '', $html));
+    }
 
     $options = array(
         LIVE_MODE_ENABLED  => get_string('mode_live', 'enrol_paystack'),
@@ -55,37 +65,38 @@ if ($ADMIN->fulltree) {
         $options
     ));
 
-    $settings->add(new admin_setting_configtext(
-        'enrol_paystack/live_secretkey',
-        get_string('live_secretkey', 'enrol_paystack'),
-        get_string('live_secretkey_desc', 'enrol_paystack'),
-        '',
-        PARAM_TEXT
+    $settings->add(new admin_setting_heading(
+        'enrol_paystack_restrictedkeys',
+        get_string('restrictedkeys', 'enrol_paystack'),
+        get_string('restrictedkeys_desc', 'enrol_paystack')
     ));
 
-    $settings->add(new admin_setting_configtext(
-        'enrol_paystack/live_publickey',
-        get_string('live_publickey', 'enrol_paystack'),
-        get_string('live_publickey_desc', 'enrol_paystack'),
-        '',
-        PARAM_TEXT
+    foreach (['test', 'live'] as $keymode) {
+        $setting = new \enrol_paystack\admin_setting_restrictedkey(
+            "enrol_paystack/{$keymode}_restrictedkey",
+            get_string("{$keymode}_restrictedkey", 'enrol_paystack'),
+            get_string("{$keymode}_restrictedkey_desc", 'enrol_paystack'),
+            $keymode
+        );
+        $setting->set_updatedcallback('enrol_paystack\\util::register_sensible_settings');
+        $settings->add($setting);
+    }
+
+    $settings->add(new admin_setting_heading(
+        'enrol_paystack_webhooksecrets',
+        get_string('webhooksecrets', 'enrol_paystack'),
+        get_string('webhooksecrets_desc', 'enrol_paystack')
     ));
 
-    $settings->add(new admin_setting_configtext(
-        'enrol_paystack/test_secretkey',
-        get_string('test_secretkey', 'enrol_paystack'),
-        get_string('test_secretkey_desc', 'enrol_paystack'),
-        '',
-        PARAM_TEXT
-    ));
-
-    $settings->add(new admin_setting_configtext(
-        'enrol_paystack/test_publickey',
-        get_string('test_publickey', 'enrol_paystack'),
-        get_string('test_publickey_desc', 'enrol_paystack'),
-        '',
-        PARAM_TEXT
-    ));
+    foreach (['test', 'live'] as $keymode) {
+        $setting = new \enrol_paystack\admin_setting_webhooksecret(
+            "enrol_paystack/{$keymode}_webhooksecret",
+            get_string("{$keymode}_webhooksecret", 'enrol_paystack'),
+            get_string('webhooksecret_desc', 'enrol_paystack')
+        );
+        $setting->set_updatedcallback('enrol_paystack\\util::register_sensible_settings');
+        $settings->add($setting);
+    }
 
     $settings->add(new admin_setting_configcheckbox(
         'enrol_paystack/mailstudents',
@@ -155,7 +166,7 @@ if ($ADMIN->fulltree) {
         $options
     ));
 
-    $currencies = enrol_get_plugin('paystack')->get_currencies();
+    $currencies = $paystackplugin->get_currencies();
     $settings->add(new admin_setting_configselect(
         'enrol_paystack/currency',
         get_string('currency', 'enrol_paystack'),

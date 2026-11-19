@@ -49,18 +49,91 @@ final class util {
         foreach ($data as $key => $value) {
             $message .= s($key) . " => " . s($value) . "\n";
         }
+        self::send_message($admin, $admin, "PAYSTACK PAYMENT ERROR: " . $subject, $message);
+    }
+
+    /**
+     * Send a plain text message through the plugin's message provider.
+     *
+     * @param \stdClass $from
+     * @param \stdClass $to
+     * @param string $subject
+     * @param string $text
+     */
+    public static function send_message($from, $to, $subject, $text)
+    {
         $eventdata = new \core\message\message();
         $eventdata->modulename        = 'moodle';
         $eventdata->component         = 'enrol_paystack';
         $eventdata->name              = 'paystack_enrolment';
-        $eventdata->userfrom          = $admin;
-        $eventdata->userto            = $admin;
-        $eventdata->subject           = "PAYSTACK PAYMENT ERROR: " . $subject;
-        $eventdata->fullmessage       = $message;
+        $eventdata->userfrom          = $from;
+        $eventdata->userto            = $to;
+        $eventdata->subject           = $subject;
+        $eventdata->fullmessage       = $text;
         $eventdata->fullmessageformat = FORMAT_PLAIN;
         $eventdata->fullmessagehtml   = '';
         $eventdata->smallmessage      = '';
         message_send($eventdata);
+    }
+
+    /**
+     * Names of the settings holding secrets, each prefixed by a mode.
+     *
+     * @return string[]
+     */
+    public static function secret_setting_names()
+    {
+        return ['test_secretkey', 'live_secretkey', 'test_restrictedkey', 'live_restrictedkey',
+            'test_webhooksecret', 'live_webhooksecret'];
+    }
+
+    /**
+     * Tell the admin Paystack rejected the restricted key, at most once an hour.
+     *
+     * @param int $http HTTP status of the failed Paystack call
+     * @param stdClass $data
+     */
+    public static function notify_key_failure($http, $data)
+    {
+        $http = (int) $http;
+        if ($http !== 401 && $http !== 403) {
+            return;
+        }
+        $key = enrol_get_plugin('paystack')->get_secretkey();
+        if (restricted_key::key_type($key) !== 'rk') {
+            return;
+        }
+        $last = (int) get_config('enrol_paystack', 'keyfailure_last');
+        if ($last > time() - 3600) {
+            return;
+        }
+        set_config('keyfailure_last', time(), 'enrol_paystack');
+        self::message_paystack_error_to_admin(get_string("keyfailure_$http", 'enrol_paystack'), $data);
+    }
+
+    /**
+     * Mark the key and secret settings as sensitive for admin presets exports.
+     *
+     * Does nothing when the site has no sensible settings list yet.
+     */
+    public static function register_sensible_settings() {
+        $current = get_config('adminpresets', 'sensiblesettings');
+        if ($current === false) {
+            return;
+        }
+        $have = array_map('trim', explode(',', $current));
+        $missing = [];
+        foreach (self::secret_setting_names() as $name) {
+            $entry = "{$name}@@enrol_paystack";
+            if (!in_array($entry, $have, true)) {
+                $missing[] = $entry;
+            }
+        }
+        if ($missing) {
+            $current = trim($current);
+            $joined = ($current === '' ? '' : rtrim($current, ', ') . ', ') . implode(', ', $missing);
+            set_config('sensiblesettings', $joined, 'adminpresets');
+        }
     }
 
     /**

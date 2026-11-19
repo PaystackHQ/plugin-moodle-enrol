@@ -38,58 +38,33 @@ class paystack
     }
 
     /**
-     * Verify Payment Transaction
+     * Whether a reference is safe to put in the verify URL path.
      *
-     * @param string $reference
-     * @param array $data
-     * @return void
+     * @param mixed $reference
+     * @return bool
      */
-    public function initialize_transaction($data)
+    public static function is_valid_reference($reference)
     {
-        $paystackUrl = $this->base_url . "transaction/initialize";
-
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => $paystackUrl,
-            CURLOPT_CUSTOMREQUEST => "POST",
-            CURLOPT_POSTFIELDS => $data,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                "authorization: Bearer " . $this->secret_key,
-                "content-type: application/json",
-                "cache-control: no-cache"
-            ],
-        ]);
-
-        $request = curl_exec($curl);
-
-        $res = json_decode($request, true);
-
-        if (curl_errno($curl)) {
-            throw new \moodle_exception(
-                'errpaystackconnect',
-                'enrol_paystack',
-                '',
-                array('url' => $paystackUrl, 'response' => $res),
-                json_encode($data)
-            );
-        }
-
-        return $res;
+        return is_string($reference) && preg_match('/^(?=.*[A-Za-z0-9])[A-Za-z0-9._=-]{1,100}\z/', $reference) === 1;
     }
 
     /**
      * Verify Payment Transaction
      *
      * @param string $reference
-     * @return void
+     * @return array ['http' => int status (0 when no response), 'body' => decoded array|null,
+     *     'data' => the body's data array of a 2xx response reporting success, else null]
      */
     public function verify_transaction($reference)
     {
-        $paystackUrl = $this->base_url . "transaction/verify/" . $reference;
+        if (!self::is_valid_reference($reference)) {
+            return ['http' => 0, 'body' => null, 'data' => null];
+        }
+
+        $paystackUrl = $this->base_url . "transaction/verify/" . rawurlencode($reference);
 
         $curl = curl_init();
-        
+
         curl_setopt_array($curl, [
             CURLOPT_URL => $paystackUrl,
             CURLOPT_RETURNTRANSFER => true,
@@ -99,23 +74,17 @@ class paystack
                 "content-type: application/json",
                 "cache-control: no-cache"
             ],
-        ]);
+        ] + http::curl_options($paystackUrl, 15, 5));
 
         $request = curl_exec($curl);
-        // $code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $res = json_decode($request, true);
+        $http = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
 
-        if (curl_errno($curl)) {
-            throw new \moodle_exception(
-                'errpaystackconnect',
-                'enrol_paystack',
-                '',
-                array('url' => $paystackUrl, 'response' => $res),
-                ''
-            );
-        }
+        $body = is_string($request) ? json_decode($request, true) : null;
 
-        return $res;
+        $body = is_array($body) ? $body : null;
+        $ok = $http >= 200 && $http <= 299 && !empty($body['status']) && isset($body['data']) && is_array($body['data']);
+
+        return ['http' => $http, 'body' => $body, 'data' => $ok ? $body['data'] : null];
     }
 
     /**
@@ -146,20 +115,9 @@ class paystack
                 "content-type: application/json",
                 "cache-control: no-cache"
             ],
-        ]);
+        ] + http::curl_options($url, 5, 3));
 
         // execute post
         curl_exec($curl);
-    }
-
-    /**
-     * Validate Webhook Signature
-     *
-     * @param $input
-     * @return boolean
-     */
-    public function validate_webhook($input)
-    {
-        return !hash_equals(hash_hmac('sha512', $input, (string) $this->secret_key), $_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] ?? '');
     }
 }

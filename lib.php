@@ -63,21 +63,165 @@ class enrol_paystack_plugin extends enrol_plugin
      */
     public function get_publickey()
     {
-        return $this->get_mode() ? 
-            $this->get_config('live_publickey') :
-            $this->get_config('test_publickey') ;
+        $prefix = $this->mode_prefix();
+        if ($this->has_restricted_key($prefix)) {
+            return $this->is_rk_checked($prefix) ? trim((string) $this->get_config($prefix . '_rkpublickey')) : '';
+        }
+        return trim((string) $this->get_config($prefix . '_publickey'));
     }
 
     /**
-     * Return secret key of this enrol plugin.
+     * Return secret key of this enrol plugin: the restricted key when one is saved and checked.
+     * An unchecked restricted key yields '' rather than falling back to the secret key.
      *
      * @return string
      */
     public function get_secretkey()
     {
-        return $this->get_mode() ? 
-            $this->get_config('live_secretkey') :
-            $this->get_config('test_secretkey') ;
+        $prefix = $this->mode_prefix();
+        $restrictedkey = $this->get_restrictedkey($prefix);
+        if ($restrictedkey !== '') {
+            return $this->is_rk_checked($prefix) ? $restrictedkey : '';
+        }
+        $legacy = trim((string) $this->get_config($prefix . '_secretkey'));
+        // A restricted key pasted into the 1.4 secret-key field never passed the permission check.
+        return strpos($legacy, 'rk_') === 0 ? '' : $legacy;
+    }
+
+    /**
+     * Whether both keys needed to take payments resolve for the active mode.
+     *
+     * @return bool
+     */
+    public function has_usable_key()
+    {
+        return $this->get_secretkey() !== '' && $this->get_publickey() !== '';
+    }
+
+    private function mode_prefix()
+    {
+        return $this->get_mode() ? 'live' : 'test';
+    }
+
+    // Read straight from config: the admin settings write it during the same request, past this instance's cache.
+    private function get_restrictedkey($mode)
+    {
+        return trim((string) get_config('enrol_paystack', $mode . '_restrictedkey'));
+    }
+
+    /**
+     * Return webhook signing secret of this enrol plugin.
+     *
+     * @return string
+     */
+    public function get_webhooksecret()
+    {
+        return trim((string) $this->get_config($this->mode_prefix() . '_webhooksecret'));
+    }
+
+    /**
+     * Fingerprint recorded when a restricted key passes the permission check.
+     *
+     * @param string $key
+     * @return string
+     */
+    public static function rk_fingerprint($key)
+    {
+        return hash('sha256', (string) $key);
+    }
+
+    /**
+     * Whether a restricted key is stored for the mode.
+     *
+     * @param string $mode 'test' or 'live'
+     * @return bool
+     */
+    public function has_restricted_key($mode)
+    {
+        return $this->get_restrictedkey($mode) !== '';
+    }
+
+    /**
+     * Whether the stored restricted key is the one that passed the permission check.
+     *
+     * @param string $mode 'test' or 'live'
+     * @return bool
+     */
+    public function is_rk_checked($mode)
+    {
+        $key = $this->get_restrictedkey($mode);
+        return $key !== '' && get_config('enrol_paystack', $mode . '_rkchecked') === self::rk_fingerprint($key);
+    }
+
+    /**
+     * Records the companions of a restricted key that passed the check and drops that mode's secret key.
+     * The key itself is written by the admin setting, which masks it in the config log.
+     *
+     * @param string $mode 'test' or 'live'
+     * @param string $key
+     * @param string $publickey public key Paystack reported for the key
+     */
+    public function set_restricted_key($mode, $key, $publickey)
+    {
+        $this->set_config($mode . '_rkpublickey', (string) $publickey);
+        $this->set_config($mode . '_rkchecked', self::rk_fingerprint($key));
+        $this->clear_secret_key($mode);
+    }
+
+    /**
+     * Drops the companions of a removed restricted key.
+     *
+     * @param string $mode 'test' or 'live'
+     */
+    public function clear_restricted_key($mode)
+    {
+        $this->set_config($mode . '_rkpublickey', '');
+        $this->set_config($mode . '_rkchecked', '');
+        $this->clear_secret_key($mode);
+    }
+
+    /**
+     * Problems with the saved keys that the admin should fix, as language strings.
+     *
+     * @return string[]
+     */
+    public function get_key_warnings()
+    {
+        $warnings = [];
+        $activemode = $this->mode_prefix();
+        if ($this->get_secretkey() !== '' && $this->get_webhooksecret() === '') {
+            $warnings[] = get_string('warning_nowebhooksecret', 'enrol_paystack', $activemode);
+        }
+        if (!$this->has_usable_key()) {
+            $warnings[] = get_string('warning_nokey', 'enrol_paystack', $activemode);
+        }
+        foreach (['test', 'live'] as $mode) {
+            if ($this->has_restricted_key($mode) && !$this->is_rk_checked($mode)) {
+                $warnings[] = get_string('warning_rkunchecked', 'enrol_paystack', $mode);
+            }
+            $legacy = trim((string) get_config('enrol_paystack', $mode . '_secretkey'));
+            if (strpos($legacy, 'rk_') === 0) {
+                $warnings[] = get_string('warning_rkinsecretfield', 'enrol_paystack', $mode);
+            } else if ($legacy !== '') {
+                $warnings[] = get_string('warning_legacysecret', 'enrol_paystack', $mode);
+            }
+        }
+        return $warnings;
+    }
+
+    /**
+     * Clears the secret key for the mode, logging the change without the value.
+     *
+     * @param string $mode 'test' or 'live'
+     */
+    private function clear_secret_key($mode)
+    {
+        $name = $mode . '_secretkey';
+        $old = (string) get_config('enrol_paystack', $name);
+        $this->set_config($name, '');
+        if ($old !== '') {
+            add_to_config_log($name, '********', '', 'enrol_paystack');
+        }
     }
 
     /**
@@ -341,6 +485,11 @@ class enrol_paystack_plugin extends enrol_plugin
 
         if ($instance->enrolenddate != 0 && $instance->enrolenddate < time()) {
             return ob_get_clean();
+        }
+
+        if (!$this->has_usable_key()) {
+            echo '<p>' . get_string('notconfigured', 'enrol_paystack') . '</p>';
+            return $OUTPUT->box(ob_get_clean());
         }
 
         $course = $DB->get_record('course', array('id' => $instance->courseid));
