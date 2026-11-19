@@ -83,7 +83,9 @@ class enrol_paystack_plugin extends enrol_plugin
         if ($restrictedkey !== '') {
             return $this->is_rk_checked($prefix) ? $restrictedkey : '';
         }
-        return trim((string) $this->get_config($prefix . '_secretkey'));
+        $legacy = trim((string) $this->get_config($prefix . '_secretkey'));
+        // A restricted key pasted into the 1.4 secret-key field never passed the permission check.
+        return strpos($legacy, 'rk_') === 0 ? '' : $legacy;
     }
 
     /**
@@ -175,6 +177,36 @@ class enrol_paystack_plugin extends enrol_plugin
     {
         $this->set_config($mode . '_rkpublickey', '');
         $this->set_config($mode . '_rkchecked', '');
+        $this->clear_secret_key($mode);
+    }
+
+    /**
+     * Problems with the saved keys that the admin should fix, as language strings.
+     *
+     * @return string[]
+     */
+    public function get_key_warnings()
+    {
+        $warnings = [];
+        $activemode = $this->mode_prefix();
+        if ($this->get_secretkey() !== '' && $this->get_webhooksecret() === '') {
+            $warnings[] = get_string('warning_nowebhooksecret', 'enrol_paystack', $activemode);
+        }
+        if (!$this->has_usable_key()) {
+            $warnings[] = get_string('warning_nokey', 'enrol_paystack', $activemode);
+        }
+        foreach (['test', 'live'] as $mode) {
+            if ($this->has_restricted_key($mode) && !$this->is_rk_checked($mode)) {
+                $warnings[] = get_string('warning_rkunchecked', 'enrol_paystack', $mode);
+            }
+            $legacy = trim((string) get_config('enrol_paystack', $mode . '_secretkey'));
+            if (strpos($legacy, 'rk_') === 0) {
+                $warnings[] = get_string('warning_rkinsecretfield', 'enrol_paystack', $mode);
+            } else if ($legacy !== '') {
+                $warnings[] = get_string('warning_legacysecret', 'enrol_paystack', $mode);
+            }
+        }
+        return $warnings;
     }
 
     /**

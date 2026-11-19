@@ -47,9 +47,9 @@ When you save, the plugin checks the key with Paystack and refuses it, naming wh
 - it has a permission the plugin doesn't need, such as Transactions: write, Disputes and refunds, Transfers, Settlements, Subaccounts, Payouts or another money-moving permission
 - Paystack can't be reached, or an IP whitelist on your integration blocks your Moodle server
 
-A restricted key replaces that mode's secret key. Once it is saved, roll your secret key in the Paystack Dashboard. You can still use a secret key and public key instead, under **Use secret keys instead**, if you can't use a restricted key.
+The settings page no longer takes secret or public keys. A site upgraded from 1.4.x keeps taking payments with the secret and public keys it already has saved, and the settings page reminds you to replace them. Saving or removing a restricted key for a mode deletes that mode's old secret key from Moodle (unless it is forced in `config.php`); then roll the secret key in the Paystack Dashboard. To change or remove a secret key saved by 1.4.x, save a restricted key for that mode.
 
-Saved keys are never shown again; the page shows only their last four characters. A restricted key that hasn't passed Paystack's permission check isn't used, and students can't pay until it does: the settings page warns about it, so paste the key again and save. Leave a field blank to keep the saved key. To delete a saved key, tick **Remove the saved key** under its field and save. A secret key can't be saved while a restricted key is saved for the same mode: remove the restricted key first.
+Saved keys are never shown again; the page shows only their last four characters. A restricted key that hasn't passed Paystack's permission check isn't used, and students can't pay until it does: the settings page warns about it, so paste the key again and save. Leave a field blank to keep the saved key. To delete a saved key, tick **Remove the saved key** under its field and save. Removing a restricted key doesn't bring back the secret key it replaced: students can't pay in that mode until you save another restricted key.
 
 The permission check runs only when a key is saved on the settings page. A key set with `admin/cli/cfg.php` or `$CFG->forced_plugin_settings` isn't checked, and the settings page warns about it.
 

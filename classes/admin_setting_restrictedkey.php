@@ -34,7 +34,7 @@ class admin_setting_restrictedkey extends admin_setting_secret
     public function validate($data) {
         if (!restricted_key::is_rk($data)) {
             if (preg_match('/^(sk|pk)_/', $data)) {
-                return $this->refuse(get_string('rk_put_secret_below', 'enrol_paystack'));
+                return $this->refuse(get_string('rk_not_secret', 'enrol_paystack'));
             }
             return $this->refuse(get_string('rk_invalid_shape', 'enrol_paystack'));
         }
