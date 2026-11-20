@@ -27,14 +27,16 @@ class paystack
     public $plugin_name;
     public $public_key;
     public $secret_key;
+    public $webhook_secret;
     public $base_url;
 
-    public function __construct($plugin, $pk, $sk)
+    public function __construct($plugin, $pk, $sk, $webhook_secret = '')
     {
         $this->base_url = "https://api.paystack.co/";
         $this->plugin_name = $plugin;
         $this->public_key = $pk;
         $this->secret_key = $sk;
+        $this->webhook_secret = trim((string) $webhook_secret);
     }
 
     /**
@@ -160,6 +162,53 @@ class paystack
      */
     public function validate_webhook($input)
     {
-        return !hash_equals(hash_hmac('sha512', $input, (string) $this->secret_key), $_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] ?? '');
+        return !$this->is_authentic_webhook($input, $_SERVER, time());
+    }
+
+    /**
+     * Check a webhook with the signing secret, or with the secret key for sk_ keys
+     *
+     * @param string $input raw request body
+     * @param array $server request headers as in $_SERVER
+     * @param int $now unix time
+     * @return boolean
+     */
+    public function is_authentic_webhook($input, $server, $now)
+    {
+        if ($this->webhook_secret !== '' && isset($server['HTTP_PAYSTACK_SIGNATURE'])) {
+            return $this->verify_signature($server['HTTP_PAYSTACK_SIGNATURE'], $input, $now);
+        }
+        $legacysignature = $server['HTTP_X_PAYSTACK_SIGNATURE'] ?? '';
+        if (strpos((string) $this->secret_key, 'sk_') === 0 && $legacysignature !== '') {
+            return hash_equals(hash_hmac('sha512', $input, (string) $this->secret_key), $legacysignature);
+        }
+        return false;
+    }
+
+    private function verify_signature($header, $input, $now)
+    {
+        $timestamp = null;
+        $signatures = [];
+        foreach (explode(',', $header) as $part) {
+            $pair = explode('=', trim($part), 2);
+            if (count($pair) !== 2) {
+                continue;
+            }
+            if ($pair[0] === 't') {
+                $timestamp = $pair[1];
+            } elseif ($pair[0] === 'v1' && strpos($pair[1], ':') !== false) {
+                $signatures[] = substr($pair[1], strpos($pair[1], ':') + 1);
+            }
+        }
+        if ($timestamp === null || !ctype_digit($timestamp) || abs($now - (int) $timestamp) > 300) {
+            return false;
+        }
+        $expected = hash_hmac('sha512', $timestamp . '.' . $input, $this->webhook_secret);
+        foreach ($signatures as $signature) {
+            if (hash_equals($expected, $signature)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
