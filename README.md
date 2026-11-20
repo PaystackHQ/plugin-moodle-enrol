@@ -9,7 +9,7 @@ This plugin helps admins and webmasters use Paystack as the payment gateway. Thi
 
 ## Requirements
 
-- PHP with the 21 Oct 2026 security fixes for critical remote code execution flaws (GHSA-w8hw-w9fx-j79w, GHSA-6wmf-4rv5-p3rp; [php.net advisory](https://www.php.net/releases/8_2_35.php)): **8.2.35, 8.3.36, 8.4.27, 8.5.12 or later**. PHP 8.1 and older no longer receive security fixes.
+- PHP with the 19 Nov 2026 security fixes, which include critical remote code execution and PHP-FPM request smuggling flaws (CVE-2026-115560, CVE-2026-129289; [php.net advisory](https://www.php.net/releases/8_2_36.php)): **8.2.36, 8.3.37, 8.4.28, 8.5.13 or later**. These also contain the 21 Oct 2026 fixes. PHP 8.1 and older no longer receive security fixes.
 - A Moodle version that supports your PHP version ([Moodle and PHP](https://docs.moodle.org/dev/Moodle_and_PHP)). Moodle 4.5 requires PHP 8.1 or later; Moodle 5.0 and 5.1 require PHP 8.2 or later and support PHP 8.4. The plugin has been tested on Moodle 4.5 with PHP 8.3.36 and on Moodle 5.1 with PHP 8.4.27.
 
 ## Installation
